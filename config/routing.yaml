@@ -1,0 +1,12 @@
+routing:
+  profile: shortest_path
+  speed_kph_default: 40
+  allow_tolls: false
+  allow_unpaved: false
+  max_k_routes: 3
+  weight_field: length_m
+  checkpoint_penalty: 120
+network:
+  nodes: data/network/nodes.gpkg
+  edges: data/network/edges.gpkg
+  centroids: data/network/centroids.gpkg

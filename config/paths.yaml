@@ -1,0 +1,6 @@
+data_raw: data/raw/
+data_interim: data/interim/
+data_processed: data/processed/
+network: data/network/
+outputs: data/processed/
+logs: data/processed/logs/

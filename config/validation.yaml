@@ -1,0 +1,13 @@
+congruence:
+  time_deviation_pct: 0.25
+  distance_deviation_pct: 0.20
+  checkpoint_required: true
+  min_volume_threshold: 10
+  speed_bounds_kph:
+    min: 5
+    max: 120
+scoring:
+  seguro: 1
+  probable: 2
+  poco_probable: 3
+  imposible: 4
