@@ -1,13 +1,33 @@
-congruence:
-  time_deviation_pct: 0.25
-  distance_deviation_pct: 0.20
-  checkpoint_required: true
-  min_volume_threshold: 10
-  speed_bounds_kph:
-    min: 5
-    max: 120
-scoring:
-  seguro: 1
-  probable: 2
-  poco_probable: 3
-  imposible: 4
+﻿"""
+Parámetros y criterios de validación y scoring de congruencias.
+"""
+
+pesos_componentes:                # Peso relativo de cada componente en el score final
+  map_matching: 0.25
+  checkpoint: 0.20
+  tiempo: 0.20
+  volumen: 0.15
+  trips: 0.10
+  validez: 0.10
+
+umbrales_congruencia:             # Rangos de score para clasificar viajes
+  seguro: 0.85                    # >= 0.85
+  probable: 0.60                  # >= 0.60
+  poco_probable: 0.35             # >= 0.35
+  imposible: 0.0                  # < 0.35
+
+calibracion:
+  tolerancia_tiempo_pct: 0.20     # +/- 20% de diferencia permitida vs ruta esperada
+  tolerancia_volumen_pct: 0.15    # +/- 15% entre volumen KIDO y volumen vial
+  tolerancia_distancia_pct: 0.15  # +/- 15% de distancia
+  smoothing_factor: 0.1           # factor de suavizado para evitar saltos en el score
+
+checks_logicos:
+  velocidad_min_kph: 5
+  velocidad_max_kph: 120
+  requiere_checkpoint: true
+
+campos_salida:
+  incluir_geojson: true
+  incluir_csv: true
+  incluir_resumen: true

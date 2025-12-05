@@ -1,12 +1,39 @@
+﻿"""
+Parámetros de ruteo y matrices (MC / MC2) para kido-ruteo.
+Algoritmo soportado: shortest_path | dijkstra | astar | k_shortest_path
+"""
+
 routing:
-  profile: shortest_path
-  speed_kph_default: 40
-  allow_tolls: false
-  allow_unpaved: false
-  max_k_routes: 3
-  weight_field: length_m
-  checkpoint_penalty: 120
+  algoritmo: shortest_path           # Selecciona el motor principal de ruteo
+  velocidad_default: 40              # km/h cuando no hay velocidad específica
+  max_k_routes: 3                    # Solo aplica si usas k_shortest_path
+  ponderadores:                      # Pesos de la función de costo
+    tiempo: 1.0
+    distancia: 0.0
+    costo: 0.0
+  restricciones:
+    debe_pasar_por_checkpoint: true
+    permitir_tolvas: false
+    permitir_no_pavimentado: false
+    penalizacion_checkpoint_seg: 120 # Penalización si no pasa por checkpoint requerido
+
 network:
-  nodes: data/network/nodes.gpkg
-  edges: data/network/edges.gpkg
-  centroids: data/network/centroids.gpkg
+  nodos: data/network/nodes.gpkg
+  arcos: data/network/edges.gpkg
+  centroides: data/network/centroids.gpkg
+  geometrias_aux: data/network/auxiliary.gpkg
+
+mc:                              # Matriz de caminos (MC)  shortest path all-to-all
+  habilitado: true
+  sample_pct: 1.0                # 1.0 = usar todos los pares OD
+  campos_salida: ["origen", "destino", "tiempo_seg", "distancia_m"]
+
+mc2:                             # Matriz de caminos con checkpoints (MC2)
+  habilitado: true
+  sample_pct: 0.8                # top 80% viajes representativos
+  checkpoints:
+    campo_id: "checkpoint_id"
+    campo_geom: "geometry"
+  k_rutas: 3
+  estrategia: "constrained"      # constrained | k-shortest
+  campos_salida: ["origen", "destino", "tiempo_seg", "distancia_m", "checkpoint_id"]

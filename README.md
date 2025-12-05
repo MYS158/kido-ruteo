@@ -131,7 +131,7 @@ network: data/network/
 
 ## ▶️ Ejecutar el pipeline completo
 ```bash
-python src/scripts/run_pipeline.py
+py src/scripts/run_pipeline.py
 ```
 El script ejecutará:
 - Limpieza →
@@ -143,7 +143,7 @@ Los resultados aparecerán en `data/processed/`.
 
 ## ▶️ Ejecutar solo el ruteo
 ```bash
-python src/scripts/generate_matrices.py
+py src/scripts/generate_matrices.py
 ```
 
 ## 🧪 Pruebas
