@@ -1,9 +1,4 @@
-﻿"""
-Parámetros de ruteo y matrices (MC / MC2) para kido-ruteo.
-Algoritmo soportado: shortest_path | dijkstra | astar | k_shortest_path
-"""
-
-routing:
+﻿routing:
   algoritmo: shortest_path           # Selecciona el motor principal de ruteo
   velocidad_default: 40              # km/h cuando no hay velocidad específica
   max_k_routes: 3                    # Solo aplica si usas k_shortest_path

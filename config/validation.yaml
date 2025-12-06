@@ -1,8 +1,4 @@
-﻿"""
-Parámetros y criterios de validación y scoring de congruencias.
-"""
-
-pesos_componentes:                # Peso relativo de cada componente en el score final
+﻿pesos_componentes:                # Peso relativo de cada componente en el score final
   map_matching: 0.25
   checkpoint: 0.20
   tiempo: 0.20

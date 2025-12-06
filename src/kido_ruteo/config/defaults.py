@@ -14,12 +14,23 @@ PATHS_DEFAULT: dict[str, Any] = {
     "data_raw": "data/raw/",
     "data_interim": "data/interim/",
     "data_processed": "data/processed/",
-    "network": "data/network/",
+    "network": "data/raw/network/",
     "logs": "data/processed/logs/",
     "outputs": {
         "geojson": "data/processed/geojson/",
         "matrices": "data/processed/matrices/",
     },
+}
+
+# Defaults para insumos (inputs)
+INPUTS_DEFAULT: dict[str, Any] = {
+    "od_dir": "data/raw/od/",
+    "od_files": [
+        "od_viaductos_1018.csv",
+        "od_viaductos_1019.csv",
+    ],
+    "geografia_zonas": "data/raw/geografia/kido_zonas.geojson",
+    "aforo_factors": "data/raw/aforo/aforo_factors.xlsx",
 }
 
 # Defaults para routing.yaml
@@ -122,14 +133,20 @@ def merge_validation(user: Mapping[str, Any] | None) -> dict[str, Any]:
     """Devuelve validation con defaults rellenando faltantes."""
     return _deep_merge(user, VALIDATION_DEFAULT)
 
+def merge_inputs(user: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Devuelve inputs con defaults rellenando faltantes."""
+    return _deep_merge(user, INPUTS_DEFAULT)
+
 def merge_all(
     paths: Mapping[str, Any] | None = None,
     routing: Mapping[str, Any] | None = None,
     validation: Mapping[str, Any] | None = None,
+    inputs: Mapping[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Combina los tres bloques con sus defaults respectivos."""
     return {
         "paths": merge_paths(paths),
         "routing": merge_routing(routing),
         "validation": merge_validation(validation),
+        "inputs": merge_inputs(inputs),
     }

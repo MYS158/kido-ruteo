@@ -13,17 +13,20 @@ from typing import Any, Dict, Mapping
 import yaml
 
 from .defaults import (
+    INPUTS_DEFAULT,
     PATHS_DEFAULT,
     ROUTING_DEFAULT,
     VALIDATION_DEFAULT,
     merge_all,
+    merge_inputs,
     merge_paths,
     merge_routing,
     merge_validation,
 )
 
 
-CONFIG_DIR = Path(__file__).resolve().parent
+# Directorio real de configuraciones YAML (raíz del proyecto /config).
+CONFIG_DIR = Path(__file__).resolve().parents[3] / "config"
 
 def _read_yaml(file_path: Path) -> dict[str, Any]:
     """Lee un YAML en disco y devuelve un dict. Maneja errores comunes."""
@@ -118,12 +121,32 @@ class ValidationConfig:
             campos_salida=dict(data.get("campos_salida", VALIDATION_DEFAULT["campos_salida"])),
         )
 
+
+@dataclass
+class InputsConfig:
+    od_dir: Path
+    od_files: list[str]
+    geografia_zonas: Path
+    aforo_factors: Path
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "InputsConfig":
+        od_files_raw = data.get("od_files", INPUTS_DEFAULT["od_files"]) or []
+        od_files = [str(f) for f in od_files_raw]
+        return cls(
+            od_dir=_to_path(data.get("od_dir", INPUTS_DEFAULT["od_dir"])),
+            od_files=od_files,
+            geografia_zonas=_to_path(data.get("geografia_zonas", INPUTS_DEFAULT["geografia_zonas"])),
+            aforo_factors=_to_path(data.get("aforo_factors", INPUTS_DEFAULT["aforo_factors"])),
+        )
+
 @dataclass
 class Config:
     """Contenedor de toda la configuración del proyecto."""
     paths: PathsConfig
     routing: RoutingConfig
     validation: ValidationConfig
+    inputs: InputsConfig
 
 class ConfigLoader:
     """Carga YAML desde el directorio config/ aplicando defaults y validaciones básicas."""
@@ -153,12 +176,21 @@ class ConfigLoader:
         paths_file: Path | str | None = None,
         routing_file: Path | str | None = None,
         validation_file: Path | str | None = None,
+        inputs_file: Path | str | None = None,
     ) -> Config:
         """Carga y combina paths, routing y validation en un solo objeto Config."""
         paths_cfg = cls.load_paths(paths_file)
         routing_cfg = cls.load_routing(routing_file)
         validation_cfg = cls.load_validation(validation_file)
-        return Config(paths=paths_cfg, routing=routing_cfg, validation=validation_cfg)
+        inputs_cfg = cls.load_inputs(inputs_file)
+        return Config(paths=paths_cfg, routing=routing_cfg, validation=validation_cfg, inputs=inputs_cfg)
+
+    @classmethod
+    def load_inputs(cls, file_path: Path | str | None = None) -> InputsConfig:
+        target = _normalize_path(file_path, "paths.yaml")  # inputs vienen dentro de paths.yaml por simplicidad
+        yaml_data = _read_yaml(target)
+        merged = merge_inputs(yaml_data.get("inputs")) if "inputs" in yaml_data else merge_inputs(None)
+        return InputsConfig.from_dict(merged)
 
 def _normalize_path(path: Path | str | None, default_name: str) -> Path:
     """Resuelve la ruta al archivo de configuración desde la base config/."""
@@ -169,5 +201,4 @@ def _normalize_path(path: Path | str | None, default_name: str) -> Path:
         candidate = CONFIG_DIR / candidate
     return candidate
 
-# Alias conveniente solicitado en README/ejemplo.
-Config = ConfigLoader
+# Nota: El alias Config apunta al dataclass Config (no al loader).

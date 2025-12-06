@@ -1,11 +1,4 @@
-﻿"""
-Rutas base del proyecto kido-ruteo.
-
-Edita estos valores para apuntar a tu almacenamiento local, red o nube.
-Ejemplo: data_raw: "D:/proyectos/kido/raw/"
-"""
-
-# Datos KIDO sin procesar (viajes, cardinalidad, aforos, zonificación, etc.).
+﻿# Datos KIDO sin procesar (viajes, cardinalidad, aforos, zonificación, etc.).
 data_raw: data/raw/
 
 # Datos intermedios generados durante limpieza y depuración.
@@ -15,7 +8,7 @@ data_interim: data/interim/
 data_processed: data/processed/
 
 # Recursos de red vial (nodos, arcos, centroides, geometrías auxiliares).
-network: data/network/
+network: data/raw/network/
 
 # Carpeta de logs y reportes de ejecución.
 logs: data/processed/logs/
@@ -24,3 +17,12 @@ logs: data/processed/logs/
 outputs:
   geojson: data/processed/geojson/
   matrices: data/processed/matrices/
+
+# Insumos reales del proyecto KIDO-RUTEO
+inputs:
+  od_dir: data/raw/od
+  od_files:
+    - od_viaductos_1018.csv
+    - od_viaductos_1019.csv
+  geografia_zonas: data/raw/geografia/kido_zonas.geojson
+  aforo_factors: data/raw/aforo/aforo_factors.xlsx
