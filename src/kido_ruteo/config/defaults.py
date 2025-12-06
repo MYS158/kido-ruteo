@@ -97,8 +97,8 @@ VALIDATION_DEFAULT: dict[str, Any] = {
     },
 }
 
-# Combina recursivamente un dict de usuario sobre los valores por defecto.
 def _deep_merge(user: Mapping[str, Any] | None, default: Mapping[str, Any]) -> dict[str, Any]:
+    """Combina recursivamente un dict de usuario sobre los valores por defecto."""
     base: dict[str, Any] = deepcopy(default)
     if not user:
         return base
@@ -110,24 +110,24 @@ def _deep_merge(user: Mapping[str, Any] | None, default: Mapping[str, Any]) -> d
             base[key] = deepcopy(value)
     return base
 
-# Devuelve paths con defaults rellenando faltantes.
 def merge_paths(user: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Devuelve paths con defaults rellenando faltantes."""
     return _deep_merge(user, PATHS_DEFAULT)
 
-# Devuelve routing con defaults rellenando faltantes.
 def merge_routing(user: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Devuelve routing con defaults rellenando faltantes."""
     return _deep_merge(user, ROUTING_DEFAULT)
 
-# Devuelve validation con defaults rellenando faltantes.
 def merge_validation(user: Mapping[str, Any] | None) -> dict[str, Any]:
+    """Devuelve validation con defaults rellenando faltantes."""
     return _deep_merge(user, VALIDATION_DEFAULT)
 
-# Combina los tres bloques con sus defaults respectivos.
 def merge_all(
     paths: Mapping[str, Any] | None = None,
     routing: Mapping[str, Any] | None = None,
     validation: Mapping[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
+    """Combina los tres bloques con sus defaults respectivos."""
     return {
         "paths": merge_paths(paths),
         "routing": merge_routing(routing),

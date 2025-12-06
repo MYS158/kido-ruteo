@@ -25,8 +25,8 @@ from .defaults import (
 
 CONFIG_DIR = Path(__file__).resolve().parent
 
-# Lee un YAML en disco y devuelve un dict. Maneja errores comunes.
 def _read_yaml(file_path: Path) -> dict[str, Any]:
+    """Lee un YAML en disco y devuelve un dict. Maneja errores comunes."""
     if not file_path.exists():
         raise FileNotFoundError(f"No se encontró el archivo de configuración: {file_path}")
 
@@ -41,10 +41,9 @@ def _read_yaml(file_path: Path) -> dict[str, Any]:
 
     return data
 
-# Convierte strings a Path; si ya es Path lo retorna.
 def _to_path(value: Any) -> Path:
+    """Convierte strings a Path; si ya es Path lo retorna."""
     return value if isinstance(value, Path) else Path(str(value))
-
 
 @dataclass
 class PathsConfig:
@@ -119,15 +118,15 @@ class ValidationConfig:
             campos_salida=dict(data.get("campos_salida", VALIDATION_DEFAULT["campos_salida"])),
         )
 
-# Contenedor de toda la configuración del proyecto.
 @dataclass
 class Config:
+    """Contenedor de toda la configuración del proyecto."""
     paths: PathsConfig
     routing: RoutingConfig
     validation: ValidationConfig
 
-# Carga YAML desde el directorio config/ aplicando defaults y validaciones básicas.
 class ConfigLoader:
+    """Carga YAML desde el directorio config/ aplicando defaults y validaciones básicas."""
     base_dir: Path = CONFIG_DIR
 
     @classmethod
@@ -148,7 +147,6 @@ class ConfigLoader:
         data = merge_validation(_read_yaml(target))
         return ValidationConfig.from_dict(data)
 
-    # Carga los tres archivos y retorna un objeto Config listo para usar.
     @classmethod
     def load_all(
         cls,
@@ -156,20 +154,20 @@ class ConfigLoader:
         routing_file: Path | str | None = None,
         validation_file: Path | str | None = None,
     ) -> Config:
+        """Carga y combina paths, routing y validation en un solo objeto Config."""
         paths_cfg = cls.load_paths(paths_file)
         routing_cfg = cls.load_routing(routing_file)
         validation_cfg = cls.load_validation(validation_file)
         return Config(paths=paths_cfg, routing=routing_cfg, validation=validation_cfg)
 
-# Resuelve la ruta al archivo de configuración desde la base config/.
 def _normalize_path(path: Path | str | None, default_name: str) -> Path:
+    """Resuelve la ruta al archivo de configuración desde la base config/."""
     if path is None:
         return CONFIG_DIR / default_name
     candidate = Path(path)
     if not candidate.is_absolute():
         candidate = CONFIG_DIR / candidate
     return candidate
-
 
 # Alias conveniente solicitado en README/ejemplo.
 Config = ConfigLoader
