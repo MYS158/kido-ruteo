@@ -26,16 +26,17 @@ def test_od_inputs_combined() -> None:
     assert not df.empty
     assert REQUIRED_COLS.issubset(df.columns)
     assert set(df["source_file"].unique()) == set(inputs_cfg.od_files)
-    assert df["total_trips"].dtype.kind in "iu"
-    assert (df["total_trips"] >= 0).all()
+    # total_trips se mantiene como texto original
+    assert df["total_trips"].dtype == object
 
 
 def test_od_converts_less_than_ten() -> None:
-    """total_trips no conserva cadenas con '<', se convierten a números (1)."""
+    """total_trips conserva valores originales como texto (incluyendo '<10')."""
     inputs_cfg = ConfigLoader.load_inputs()
     df = load_od(inputs_cfg)
 
-    # No deben quedar literales con '<', lo que implica conversión.
-    assert not df["total_trips"].astype(str).str.startswith("<").any()
-    # Si existían valores <10, deberían aparecer como 1 (no es error si no existen).
-    assert (df["total_trips"] >= 0).all()
+    # total_trips debe ser texto
+    assert df["total_trips"].dtype == object
+    # Puede contener literales con '<' (eso es correcto ahora)
+    # Verificar que hay algunos valores '<10' en los datos originales
+    assert df["total_trips"].astype(str).str.startswith("<").any()

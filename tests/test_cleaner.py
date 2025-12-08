@@ -101,7 +101,7 @@ class TestCleanKido:
         assert result.empty
 
     def test_clean_numeric_conversion(self) -> None:
-        """Convierte total_trips a numérico y maneja coerce."""
+        """total_trips se mantiene como texto, total_trips_modif es numérico."""
         df = pd.DataFrame({
             "origin_id": ["1", "2"],
             "destination_id": ["2", "3"],
@@ -111,6 +111,9 @@ class TestCleanKido:
             "total_trips": ["100", "invalid"],  # string values
         })
         result = clean_kido(df)
-        # Verificar que es numérico (int o float)
-        assert result["total_trips"].dtype in [int, float, "int64", "float64"]
-        assert result.iloc[1]["total_trips"] == 0  # invalid → fillna(0)
+        # total_trips se mantiene como texto
+        assert result["total_trips"].dtype == object
+        # total_trips_modif es numérico
+        assert result["total_trips_modif"].dtype in [int, float, "int64", "float64"]
+        # "invalid" → 0 → < 10 → 1
+        assert result.iloc[1]["total_trips_modif"] == 1

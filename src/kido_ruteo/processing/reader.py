@@ -131,7 +131,8 @@ def load_od(inputs_cfg: Any) -> pd.DataFrame:
         df["origin_name"] = df["origin_name"].astype(str).str.strip()
         df["destination_name"] = df["destination_name"].astype(str).str.strip()
         df["fecha"] = pd.to_datetime(df["fecha"], errors="coerce")
-        df["total_trips"] = _coerce_total_trips(df["total_trips"])
+        # total_trips se mantiene como texto original (sin conversión)
+        df["total_trips"] = df["total_trips"].astype(str)
 
         frames.append(df)
 
@@ -142,8 +143,7 @@ def load_od(inputs_cfg: Any) -> pd.DataFrame:
     if combined.empty:
         raise ValueError("Los archivos OD están vacíos")
 
-    # Asegurar columnas finales y tipo numérico int para trips.
-    combined["total_trips"] = combined["total_trips"].astype(int)
+    # Columnas finales (total_trips se mantiene como texto).
     expected = [
         "origin_id",
         "origin_name",

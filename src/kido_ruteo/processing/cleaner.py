@@ -40,12 +40,9 @@ def clean_kido(df: pd.DataFrame) -> pd.DataFrame:
     if invalid_dates:
         logger.warning("%s registros con fecha inválida", invalid_dates)
 
-    # Total trips a numérico.
-    df["total_trips"] = pd.to_numeric(df["total_trips"], errors="coerce")
-    df["total_trips"] = df["total_trips"].fillna(0)
-
-    # total_trips_modif.
-    df["total_trips_modif"] = df["total_trips"].apply(lambda x: 1 if x < 10 else x)
+    # total_trips_modif: convierte texto a numérico, "<10" → 1, resto → valor.
+    df["total_trips_modif"] = pd.to_numeric(df["total_trips"], errors="coerce").fillna(0)
+    df["total_trips_modif"] = df["total_trips_modif"].apply(lambda x: 1 if x < 10 else x)
 
     # Flags básicos de validez OD.
     df["od_valido"] = (~df["origin_id"].isna()) & (~df["destination_id"].isna())
