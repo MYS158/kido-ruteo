@@ -49,8 +49,10 @@ def compute_shortest_path(
     
     # Caso especial: mismo nodo
     if origin_node == dest_node:
+        # Retornar una ruta degenerada con el nodo repetido para que capas posteriores
+        # (auto checkpoint, constrained path) puedan operar sin fallar por lista vacía.
         return {
-            "path_nodes": [],
+            "path_nodes": [origin_node],
             "path_edges": [],
             "length_m": 0.0,
             "time_min": 0.0,
