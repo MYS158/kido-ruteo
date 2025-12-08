@@ -37,14 +37,22 @@ INPUTS_DEFAULT: dict[str, Any] = {
 ROUTING_DEFAULT: dict[str, Any] = {
     "routing": {
         "algoritmo": "shortest_path",
+        "weight": "weight",
         "velocidad_default": 40,
         "max_k_routes": 3,
+        "fix_disconnected_nodes": True,
+        "max_snap_distance_m": 400,
         "ponderadores": {"tiempo": 1.0, "distancia": 0.0, "costo": 0.0},
         "restricciones": {
             "debe_pasar_por_checkpoint": True,
             "permitir_tolvas": False,
             "permitir_no_pavimentado": False,
             "penalizacion_checkpoint_seg": 120,
+        },
+        "checkpoint": {
+            "mode": "auto",
+            "percent_lower": 0.40,
+            "percent_upper": 0.60,
         },
     },
     "network": {

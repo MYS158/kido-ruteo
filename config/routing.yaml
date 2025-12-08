@@ -3,6 +3,8 @@
   weight: weight                     # Atributo de peso para routing ("weight", "length", "time")
   velocidad_default: 50              # km/h cuando no hay velocidad específica
   max_k_routes: 3                    # Solo aplica si usas k_shortest_path
+  fix_disconnected_nodes: true       # Remapea nodos fuera del grafo al más cercano
+  max_snap_distance_m: 400           # Distancia máxima para remapeo de nodos aislados
   ponderadores:                      # Pesos de la función de costo
     tiempo: 1.0
     distancia: 0.0

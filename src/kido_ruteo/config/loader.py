@@ -74,10 +74,14 @@ class PathsConfig:
 @dataclass
 class RoutingConfig:
     algoritmo: str
+    weight: str
     velocidad_default: float
     max_k_routes: int
+    fix_disconnected_nodes: bool
+    max_snap_distance_m: float
     ponderadores: Dict[str, float]
     restricciones: Dict[str, Any]
+    checkpoint: Dict[str, Any]
     network: Dict[str, Path]
     centroids: CentroidsConfig
     manual_selection: ManualSelectionConfig
@@ -91,12 +95,26 @@ class RoutingConfig:
         network_paths = {key: _to_path(val) for key, val in network_block.items()}
         return cls(
             algoritmo=str(routing_block.get("algoritmo", ROUTING_DEFAULT["routing"]["algoritmo"])),
+            weight=str(routing_block.get("weight", ROUTING_DEFAULT["routing"].get("weight", "weight"))),
             velocidad_default=float(
                 routing_block.get("velocidad_default", ROUTING_DEFAULT["routing"]["velocidad_default"])
             ),
             max_k_routes=int(routing_block.get("max_k_routes", ROUTING_DEFAULT["routing"]["max_k_routes"])),
+            fix_disconnected_nodes=bool(
+                routing_block.get(
+                    "fix_disconnected_nodes",
+                    ROUTING_DEFAULT["routing"].get("fix_disconnected_nodes", True),
+                )
+            ),
+            max_snap_distance_m=float(
+                routing_block.get(
+                    "max_snap_distance_m",
+                    ROUTING_DEFAULT["routing"].get("max_snap_distance_m", 400),
+                )
+            ),
             ponderadores=dict(routing_block.get("ponderadores", ROUTING_DEFAULT["routing"]["ponderadores"])),
             restricciones=dict(routing_block.get("restricciones", ROUTING_DEFAULT["routing"]["restricciones"])),
+            checkpoint=dict(routing_block.get("checkpoint", ROUTING_DEFAULT["routing"].get("checkpoint", {}))),
             network=network_paths,
             centroids=CentroidsConfig.from_dict(data),
             manual_selection=ManualSelectionConfig.from_dict(data),

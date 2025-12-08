@@ -19,51 +19,81 @@ logger = logging.getLogger(__name__)
 
 
 def run_routing_pipeline(
-    network_path: str | Path,
     df_od: pd.DataFrame,
-    df_manual_checkpoints: pd.DataFrame | None = None,
     gdf_nodes: gpd.GeoDataFrame | None = None,
     gdf_edges: gpd.GeoDataFrame | None = None,
+    df_manual_checkpoints: pd.DataFrame | None = None,
+    network_path: str | Path | None = None,
     output_dir: str | Path | None = None,
     weight: str = "weight",
     checkpoint_mode: str = "auto",
     percent_lower: float = 0.40,
     percent_upper: float = 0.60,
+    fix_disconnected_nodes: bool = True,
+    max_snap_distance_m: float = 400.0,
 ) -> pd.DataFrame:
     """Ejecuta pipeline completo de routing para pares OD.
     
     Args:
-        network_path: Ruta al directorio con edges.gpkg, nodes.gpkg
         df_od: DataFrame con columnas origin_node_id, destination_node_id
+        gdf_nodes: GeoDataFrame con nodos (para auto_checkpoint e identificar conexiones)
+        gdf_edges: GeoDataFrame con edges (para detectar nodos desconectados)
         df_manual_checkpoints: DataFrame con checkpoints manuales (opcional)
-        gdf_nodes: GeoDataFrame con nodos (opcional, para auto_checkpoint)
-        gdf_edges: GeoDataFrame con edges (opcional, para auto_checkpoint)
+        network_path: Ruta al directorio con edges.gpkg, nodes.gpkg (opcional si gdf_*=provided)
         output_dir: Directorio para guardar resultados (opcional)
         weight: Atributo de peso para routing (default: "weight")
         checkpoint_mode: "auto" o "manual" (default: "auto")
         percent_lower: Percentil inferior para auto checkpoint
         percent_upper: Percentil superior para auto checkpoint
+        fix_disconnected_nodes: Si True, remapea nodos desconectados al más cercano
+        max_snap_distance_m: Distancia máxima para remapeo de nodos
         
     Returns:
-        DataFrame con resultados de routing:
-        - origin_node_id
-        - destination_node_id
-        - manual_checkpoint (si existe)
-        - auto_checkpoint
-        - checkpoint_source ("manual" o "auto")
-        - mc_length_m
-        - mc_time_min
-        - mc2_length_m
-        - mc2_time_min
-        - ratio_x (mc2_length / mc_length)
-        - path_nodes_mc
-        - path_nodes_mc2
+        DataFrame con resultados de routing con atributo .attrs["remapped_nodes"] si aplica
     """
     logger.info("=== Iniciando pipeline de routing ===")
     
-    # Cargar grafo
-    logger.info("Cargando grafo desde %s", network_path)
-    graph = load_graph_from_network_dir(network_path)
+    # Cargar o usar geodataframes proporcionados
+    if gdf_nodes is None or gdf_edges is None:
+        if network_path is None:
+            raise ValueError("Se requiere network_path si gdf_nodes/gdf_edges no se proporcionan")
+        logger.info("Cargando grafo desde %s", network_path)
+        graph = load_graph_from_network_dir(network_path)
+        gdf_nodes = gpd.read_file(Path(network_path) / "nodes.gpkg")
+        gdf_edges = gpd.read_file(Path(network_path) / "edges.gpkg")
+    else:
+        graph = None
+    
+    # Si no tenemos el grafo aún, construirlo desde edges
+    if graph is None:
+        logger.info("Construyendo grafo dirigido desde edges")
+        graph = nx.DiGraph()
+        for _, row in gdf_edges.iterrows():
+            u, v = row["u"], row["v"]
+            length = float(row.get("length", 1.0))
+            speed = float(row.get("speed", 50.0))
+            weight_val = (length / 1000.0) / speed * 60.0 if speed > 0 else 1.0
+            graph.add_edge(u, v, length=length, speed=speed, weight=weight_val)
+
+    # Detectar nodos desconectados
+    graph_nodes = set(graph.nodes())
+    remapped_nodes: dict[int | str, int | str] = {}
+
+    if fix_disconnected_nodes and gdf_nodes is not None:
+        gdf_connected = gdf_nodes[gdf_nodes["node_id"].isin(graph_nodes)].copy()
+        gdf_disconnected = gdf_nodes[~gdf_nodes["node_id"].isin(graph_nodes)].copy()
+        if not gdf_disconnected.empty:
+            logger.info("Detectados %d nodos desconectados", len(gdf_disconnected))
+            for _, row in gdf_disconnected.iterrows():
+                node_id = row["node_id"]
+                geom = row.geometry
+                dist = gdf_connected.geometry.distance(geom)
+                nearest_idx = dist.idxmin()
+                nearest_node = int(gdf_connected.loc[nearest_idx, "node_id"])
+                nearest_dist = dist.iloc[nearest_idx]
+                if nearest_dist <= max_snap_distance_m:
+                    remapped_nodes[node_id] = nearest_node
+                    logger.debug("Nodo %s remapeado a %s (%.1f m)", node_id, nearest_node, nearest_dist)
     
     # Validar columnas requeridas en df_od
     required_cols = {"origin_node_id", "destination_node_id"}
@@ -71,17 +101,23 @@ def run_routing_pipeline(
     if missing_cols:
         raise ValueError(f"Faltan columnas en df_od: {missing_cols}")
     
+    # Aplicar remapeo a df_od
+    df_od_remapped = df_od.copy()
+    if remapped_nodes:
+        df_od_remapped["origin_node_id"] = df_od_remapped["origin_node_id"].replace(remapped_nodes)
+        df_od_remapped["destination_node_id"] = df_od_remapped["destination_node_id"].replace(remapped_nodes)
+    
     # Preparar lista de resultados
     results = []
     
-    total_pairs = len(df_od)
-    logger.info("Procesando %d pares OD", total_pairs)
+    total_pairs = len(df_od_remapped)
+    logger.info("Procesando %d pares OD (con remapeo aplicado)", total_pairs)
     
-    for idx, row in df_od.iterrows():
+    for idx, row in df_od_remapped.iterrows():
         origin = row["origin_node_id"]
         destination = row["destination_node_id"]
         
-        if idx % 100 == 0:
+        if idx % 100 == 0 and idx > 0:
             logger.info("Procesando par %d/%d", idx + 1, total_pairs)
         
         try:
@@ -116,9 +152,10 @@ def run_routing_pipeline(
     # Crear DataFrame de resultados
     df_results = pd.DataFrame(results)
     
+    success_count = (~df_results.get("error", pd.Series(dtype=object)).notna()).sum()
     logger.info(
         "Pipeline completado: %d/%d pares procesados exitosamente",
-        (~df_results.get("error", pd.Series(dtype=object)).notna()).sum(),
+        success_count,
         total_pairs,
     )
     
@@ -130,6 +167,17 @@ def run_routing_pipeline(
         output_file = output_path / "routing_results.csv"
         df_results.to_csv(output_file, index=False)
         logger.info("Resultados guardados en %s", output_file)
+        
+        if remapped_nodes:
+            mapping_file = output_path / "mapping_disconnected_nodes.csv"
+            pd.DataFrame([
+                {"original_node_id": k, "mapped_to_node_id": v}
+                for k, v in remapped_nodes.items()
+            ]).to_csv(mapping_file, index=False)
+            logger.info("Mapeo de nodos desconectados guardado en %s", mapping_file)
+    
+    # Almacenar remapped_nodes en atributos del DataFrame para auditoría
+    df_results.attrs["remapped_nodes"] = remapped_nodes
     
     return df_results
 

@@ -47,10 +47,10 @@ def compute_shortest_path(
     if dest_node not in graph.nodes():
         raise ValueError(f"Nodo destino {dest_node} no existe en el grafo")
     
-    # Caso especial: mismo nodo
+    # Caso especial: mismo nodo → ruta degenerada para evitar listas vacías
     if origin_node == dest_node:
         return {
-            "path_nodes": [],
+            "path_nodes": [origin_node],
             "path_edges": [],
             "length_m": 0.0,
             "time_min": 0.0,

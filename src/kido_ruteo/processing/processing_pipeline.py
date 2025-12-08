@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 class KIDORawProcessor:
     """Orquesta la limpieza, enriquecimiento y routing de viajes KIDO."""
 
-    def __init__(self) -> None:
+    def __init__(self, config: Optional[Config | ConfigLoader] = None) -> None:
         self.config: Optional[Config] = None
         self.paths_cfg: Optional[PathsConfig] = None
         self.inputs_cfg: Optional[InputsConfig] = None
@@ -73,6 +73,9 @@ class KIDORawProcessor:
         self.processed_df: Optional[pd.DataFrame] = None
         self.mc_df: Optional[pd.DataFrame] = None
         self.mc2_df: Optional[pd.DataFrame] = None
+
+        if config is not None:
+            self.load_data(config)
 
     def load_data(self, config: Config | ConfigLoader) -> None:
         """Carga viajes KIDO y metadatos de red desde la configuración."""
@@ -110,6 +113,10 @@ class KIDORawProcessor:
             return None
 
         centroids_cfg = self.config.routing.centroids
+        if centroids_cfg is None:
+            logger.warning("Configuración de centroides no disponible; usando valores por defecto")
+            return None
+        
         centroids_path = Path(centroids_cfg.output)
 
         # Verificar si forzar recálculo
@@ -167,6 +174,10 @@ class KIDORawProcessor:
             return None
 
         manual_cfg = self.config.routing.manual_selection
+        
+        if manual_cfg is None:
+            logger.info("Configuración de manual_selection no disponible")
+            return None
 
         if not manual_cfg.enabled:
             logger.info("Manual checkpoint selection disabled")
@@ -186,6 +197,15 @@ class KIDORawProcessor:
         except Exception as exc:
             logger.error("Error cargando manual checkpoints: %s", exc)
             return None
+
+    def run_full_pipeline(self, config: Optional[Config | ConfigLoader] = None) -> pd.DataFrame:
+        """Carga insumos (si aplica) y ejecuta el proceso completo de Fase B."""
+        if config is not None:
+            self.load_data(config)
+        elif self.config is None:
+            raise RuntimeError("Debe proporcionar config o ejecutar load_data antes de run_full_pipeline")
+
+        return self.process()
 
     def process(self) -> pd.DataFrame:
         """Ejecuta la secuencia completa de Fase B.
