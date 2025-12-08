@@ -1,6 +1,7 @@
 ﻿routing:
   algoritmo: shortest_path           # Selecciona el motor principal de ruteo
-  velocidad_default: 40              # km/h cuando no hay velocidad específica
+  weight: weight                     # Atributo de peso para routing ("weight", "length", "time")
+  velocidad_default: 50              # km/h cuando no hay velocidad específica
   max_k_routes: 3                    # Solo aplica si usas k_shortest_path
   ponderadores:                      # Pesos de la función de costo
     tiempo: 1.0
@@ -11,8 +12,14 @@
     permitir_tolvas: false
     permitir_no_pavimentado: false
     penalizacion_checkpoint_seg: 120 # Penalización si no pasa por checkpoint requerido
+  checkpoint:
+    mode: auto                       # auto | manual
+    percent_lower: 0.40              # Percentil inferior para auto checkpoint
+    percent_upper: 0.60              # Percentil superior para auto checkpoint
+  output_dir: data/processed/routing # Directorio para resultados
 
 network:
+  directory: data/network            # Directorio con edges.gpkg, nodes.gpkg
   nodos: data/raw/network/nodes.gpkg
   arcos: data/raw/network/edges.gpkg
   centroides: data/network/centroids.gpkg
