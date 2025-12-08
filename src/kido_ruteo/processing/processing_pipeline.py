@@ -1,4 +1,20 @@
-"""Pipeline de procesamiento de datos KIDO (Fase B)."""
+"""Pipeline de procesamiento de datos KIDO (Fase B).
+
+Flujo completo:
+1. Cargar OD
+2. Calcular o cargar centroides por subred
+3. Asignar nodos origen/destino basados en centroides
+4. Aplicar total_trips_modif
+5. Detectar intrazonales
+6. Aplicar cardinalidad (sentido)
+7. Calcular vectores de acceso (V1, V2)
+8. Validar contra vectores
+9. Generar MC (matriz de caminos todos los pares)
+10. Seleccionar top 80% viajes representativos
+11. Generar MC2 con checkpoint (manual override si existe)
+12. Calcular X = (A→C + C→B) / (A→B)
+13. Asignar congruencia según umbrales
+"""
 from __future__ import annotations
 
 import logging
@@ -20,51 +36,235 @@ from .intrazonal import marcar_intrazonales
 from .vector_acceso import generar_vectores_acceso
 from .cardinalidad import asignar_sentido
 
+# Imports opcionales para centroids y manual_selection
+try:
+    from .centroids import (
+        compute_all_zone_centroids,
+        load_centroids,
+        save_centroids,
+    )
+    CENTROIDS_AVAILABLE = True
+except (ImportError, AttributeError):
+    CENTROIDS_AVAILABLE = False
+
+try:
+    from ..routing.manual_selection import load_manual_selection
+    MANUAL_SELECTION_AVAILABLE = True
+except ImportError:
+    MANUAL_SELECTION_AVAILABLE = False
+
 
 logger = logging.getLogger(__name__)
 
+
 class KIDORawProcessor:
-    """Orquesta la limpieza y enriquecimiento de viajes KIDO."""
+    """Orquesta la limpieza, enriquecimiento y routing de viajes KIDO."""
 
     def __init__(self) -> None:
+        self.config: Optional[Config] = None
         self.paths_cfg: Optional[PathsConfig] = None
         self.inputs_cfg: Optional[InputsConfig] = None
         self.raw_df: Optional[pd.DataFrame] = None
         self.zonas: Any = None
+        self.centroids_gdf: Any = None
         self.aforo: Optional[pd.DataFrame] = None
         self.network: dict[str, Any] = {}
+        self.manual_checkpoints: Optional[pd.DataFrame] = None
         self.processed_df: Optional[pd.DataFrame] = None
+        self.mc_df: Optional[pd.DataFrame] = None
+        self.mc2_df: Optional[pd.DataFrame] = None
 
     def load_data(self, config: Config | ConfigLoader) -> None:
         """Carga viajes KIDO y metadatos de red desde la configuración."""
         cfg = config.load_all() if isinstance(config, ConfigLoader) else config
+        self.config = cfg
         self.paths_cfg = cfg.paths
         self.inputs_cfg = cfg.inputs
+
+        logger.info("=== Fase B: Cargando insumos ===")
         self.raw_df = self.load_od()
         self.zonas = self.load_zonas()
         self.aforo = self.load_aforo()
         self.network = load_network_metadata(cfg.paths)
+        self.centroids_gdf = self.load_or_compute_centroids()
+        self.manual_checkpoints = self.load_manual_checkpoints()
+
         logger.info(
-            "Datos cargados: viajes=%s, zonas=%s, aforo=%s, network=%s",
+            "Datos cargados: viajes=%d, zonas=%s, centroids=%s, aforo=%s, network=%s, manual_checkpoints=%s",
             len(self.raw_df),
-            None if self.zonas is None else "ok",
-            None if self.aforo is None else len(self.aforo),
-            list(self.network),
+            "ok" if self.zonas is not None else "None",
+            len(self.centroids_gdf) if self.centroids_gdf is not None else "None",
+            len(self.aforo) if self.aforo is not None else "None",
+            list(self.network.keys()),
+            len(self.manual_checkpoints) if self.manual_checkpoints is not None else "None",
         )
 
+    def load_or_compute_centroids(self) -> Any:
+        """Carga centroides existentes o los calcula si no existen o si recompute=True."""
+        if not CENTROIDS_AVAILABLE:
+            logger.warning("Módulo centroids no disponible (requiere geopandas + networkx)")
+            return None
+
+        if self.config is None:
+            logger.warning("Config no disponible para centroids")
+            return None
+
+        centroids_cfg = self.config.routing.centroids
+        centroids_path = Path(centroids_cfg.output)
+
+        # Verificar si forzar recálculo
+        if centroids_cfg.recompute:
+            logger.info("recompute=True: forzando recálculo de centroides")
+        elif centroids_path.exists():
+            try:
+                logger.info("Cargando centroides existentes desde %s", centroids_path)
+                centroids_gdf = load_centroids(centroids_path)
+                self.centroids_gdf = centroids_gdf  # Asignar al atributo de instancia
+                return centroids_gdf
+            except Exception as exc:
+                logger.warning("Error cargando centroides (%s), recalculando...", exc)
+
+        # Calcular centroides
+        if self.zonas is None:
+            logger.warning("No hay zonas cargadas, no se pueden calcular centroides")
+            return None
+
+        nodes_gdf = self.network.get("nodes")
+        edges_gdf = self.network.get("edges")
+
+        if nodes_gdf is None or edges_gdf is None:
+            logger.warning("Red vial incompleta (nodes/edges), no se calculan centroides")
+            return None
+
+        logger.info("Calculando centroides con método %s...", centroids_cfg.method)
+
+        # Combinar zonas core y checkpoint si están separadas
+        if isinstance(self.zonas, dict):
+            zonas_gdf = pd.concat([self.zonas.get("core", pd.DataFrame()), self.zonas.get("checkpoint", pd.DataFrame())], ignore_index=True)
+        else:
+            zonas_gdf = self.zonas
+
+        centroids_gdf = compute_all_zone_centroids(
+            zonas_gdf=zonas_gdf,
+            gdf_nodes=nodes_gdf,
+            gdf_edges=edges_gdf,
+            method=centroids_cfg.method,
+        )
+
+        # Guardar centroides
+        save_centroids(centroids_gdf, centroids_path)
+        
+        self.centroids_gdf = centroids_gdf  # Asignar al atributo de instancia
+        return centroids_gdf
+
+    def load_manual_checkpoints(self) -> Optional[pd.DataFrame]:
+        """Carga archivo CSV con selección manual de checkpoints."""
+        if not MANUAL_SELECTION_AVAILABLE:
+            logger.warning("Módulo manual_selection no disponible")
+            return None
+
+        if self.config is None:
+            return None
+
+        manual_cfg = self.config.routing.manual_selection
+
+        if not manual_cfg.enabled:
+            logger.info("Manual checkpoint selection disabled")
+            return None
+
+        manual_path = Path(manual_cfg.file)
+
+        if not manual_path.exists():
+            logger.warning("Archivo manual checkpoints no encontrado: %s", manual_path)
+            return None
+
+        try:
+            df = load_manual_selection(manual_path)
+            logger.info("Selecciones manuales cargadas: %d pares", len(df))
+            self.manual_checkpoints = df  # Asignar al atributo de instancia
+            return df
+        except Exception as exc:
+            logger.error("Error cargando manual checkpoints: %s", exc)
+            return None
+
     def process(self) -> pd.DataFrame:
-        """Ejecuta la secuencia de limpieza y enriquecimiento."""
+        """Ejecuta la secuencia completa de Fase B.
+
+        Pasos:
+        1. Limpiar datos OD
+        2. Asignar nodos origen/destino desde centroides
+        3. Aplicar total_trips_modif
+        4. Detectar intrazonales
+        5. Aplicar cardinalidad (sentido)
+        6. Calcular vectores de acceso
+        7. [Fase C] Generar MC, MC2, congruencias
+        """
         if self.paths_cfg is None or self.raw_df is None:
             raise RuntimeError("Debe ejecutar load_data primero")
 
+        logger.info("=== Fase B: Procesando pipeline ===")
+
+        # Paso 1: Limpieza
+        logger.info("Paso 1: Limpieza de datos")
         df = clean_kido(self.raw_df)
+
+        # Paso 2: Asignar nodos desde centroides
+        logger.info("Paso 2: Asignando nodos origen/destino")
+        df = self._assign_nodes_from_centroids(df)
+
+        # Paso 3: total_trips_modif ya se aplica en clean_kido
+
+        # Paso 4: Detectar intrazonales
+        logger.info("Paso 4: Detectando viajes intrazonales")
         df = marcar_intrazonales(df)
-        df = generar_vectores_acceso(df)
+
+        # Paso 5: Cardinalidad
+        logger.info("Paso 5: Asignando cardinalidad (sentido)")
         df = asignar_sentido(df, self.network.get("cardinalidad"))
 
+        # Paso 6: Vectores de acceso
+        logger.info("Paso 6: Calculando vectores de acceso V1/V2")
+        df = generar_vectores_acceso(df)
+
+        # Guardar resultados intermedios
         self.processed_df = df
         self._ensure_dirs(self.paths_cfg.data_interim, self.paths_cfg.logs)
         self.save_interim(df)
+
+        logger.info("Pipeline Fase B completado: %d registros procesados", len(df))
+
+        return df
+
+    def _assign_nodes_from_centroids(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Asigna origin_node_id y destination_node_id desde centroides."""
+        if self.centroids_gdf is None:
+            logger.warning("No hay centroides, no se asignan nodos")
+            df["origin_node_id"] = None
+            df["destination_node_id"] = None
+            return df
+
+        df = df.copy()
+
+        # Crear mapeo zone_id -> centroid_node_id
+        zone_to_node = {}
+        for idx, row in self.centroids_gdf.iterrows():
+            zone_id = str(row.get("zone_id"))
+            node_id = row.get("centroid_node_id")
+            if node_id is not None:
+                zone_to_node[zone_id] = str(node_id)
+
+        # Asignar nodos
+        df["origin_node_id"] = df["origin_id"].astype(str).map(zone_to_node)
+        df["destination_node_id"] = df["destination_id"].astype(str).map(zone_to_node)
+
+        missing_origin = df["origin_node_id"].isna().sum()
+        missing_dest = df["destination_node_id"].isna().sum()
+
+        if missing_origin > 0:
+            logger.warning("%d viajes sin nodo origen asignado", missing_origin)
+        if missing_dest > 0:
+            logger.warning("%d viajes sin nodo destino asignado", missing_dest)
+
         return df
 
     def load_od(self) -> pd.DataFrame:

@@ -234,6 +234,142 @@ class TestKIDORawProcessorSaveInterim:
         pd.testing.assert_frame_equal(loaded_csv, original_df.astype(str))
 
 
+class TestKIDORawProcessorCentroids:
+    """Tests para integración de centroides."""
+    
+    def test_load_centroids_if_exists(self, tmp_path: Path) -> None:
+        """load_or_compute_centroids carga GPKG si existe y recompute=False."""
+        # Skip si NetworkX no disponible (Python 3.14 incompatibilidad)
+        try:
+            import networkx as nx
+        except (ImportError, AttributeError) as exc:
+            pytest.skip(f"NetworkX no disponible: {exc}")
+        
+        gpd = pytest.importorskip("geopandas")
+        pytest.importorskip("shapely")
+        from shapely.geometry import Point
+        
+        processor = KIDORawProcessor()
+        processor.paths_cfg = MagicMock()
+        processor.network_dir = tmp_path / "network"
+        processor.network_dir.mkdir(parents=True)
+        
+        # Crear centroids.gpkg de prueba
+        centroids_gdf = gpd.GeoDataFrame({
+            "zone_id": ["1", "2"],
+            "centroid_node_id": ["node_1", "node_2"],
+        }, geometry=[Point(0, 0), Point(1, 1)], crs="EPSG:4326")
+        
+        centroids_path = processor.network_dir / "centroids.gpkg"
+        centroids_gdf.to_file(centroids_path, driver="GPKG")
+        
+        # Mock config
+        mock_config = MagicMock()
+        mock_config.routing.centroids.recompute = False
+        mock_config.routing.centroids.output = str(centroids_path)
+        processor.config = mock_config
+        
+        # Ejecutar (sin patch, usa función real)
+        result = processor.load_or_compute_centroids()
+        
+        assert result is not None
+        assert len(result) == 2
+    
+    def test_compute_centroids_if_missing(self, tmp_path: Path) -> None:
+        """load_or_compute_centroids computa centroides si no existe GPKG."""
+        # Skip si NetworkX no disponible (Python 3.14 incompatibilidad)
+        try:
+            import networkx as nx
+        except (ImportError, AttributeError) as exc:
+            pytest.skip(f"NetworkX no disponible: {exc}")
+        
+        gpd = pytest.importorskip("geopandas")
+        pytest.importorskip("shapely")
+        from shapely.geometry import Point
+        
+        processor = KIDORawProcessor()
+        processor.paths_cfg = MagicMock()
+        processor.network_dir = tmp_path / "network"
+        processor.network_dir.mkdir(parents=True)
+        
+        # Mock zonas, nodes, edges
+        processor.zonas = gpd.GeoDataFrame({
+            "zone_id": ["1", "2"],
+        }, geometry=[Point(0, 0).buffer(0.1), Point(1, 1).buffer(0.1)], crs="EPSG:4326")
+        
+        processor.network = {
+            "nodes": gpd.GeoDataFrame({
+                "node_id": ["n1", "n2"],
+            }, geometry=[Point(0, 0), Point(1, 1)], crs="EPSG:4326"),
+            "edges": gpd.GeoDataFrame({
+                "edge_id": ["e1"],
+                "u": ["n1"],
+                "v": ["n2"],
+            }, geometry=[Point(0, 0)], crs="EPSG:4326")
+        }
+        
+        # Mock config
+        mock_config = MagicMock()
+        mock_config.routing.centroids.recompute = False
+        mock_config.routing.centroids.method = "degree"
+        mock_config.routing.centroids.output = str(tmp_path / "network" / "centroids.gpkg")
+        processor.config = mock_config
+        
+        # Ejecutar con mock de compute_all_zone_centroids
+        computed_gdf = gpd.GeoDataFrame({
+            "zone_id": ["1", "2"],
+            "centroid_node_id": ["n1", "n2"],
+        }, geometry=[Point(0, 0), Point(1, 1)], crs="EPSG:4326")
+        
+        with patch("kido_ruteo.processing.centroids.compute_all_zone_centroids", return_value=computed_gdf):
+            result = processor.load_or_compute_centroids()
+        
+        assert result is not None
+        assert len(result) == 2
+
+
+class TestKIDORawProcessorManualCheckpoints:
+    """Tests para integración de manual checkpoints."""
+    
+    def test_load_manual_checkpoints_success(self, tmp_path: Path) -> None:
+        """load_manual_checkpoints carga CSV si enabled=True."""
+        processor = KIDORawProcessor()
+        processor.paths_cfg = MagicMock()
+        
+        # Crear CSV temporal
+        manual_csv = tmp_path / "manual_checkpoints.csv"
+        manual_df = pd.DataFrame({
+            "origin_zone_id": ["1", "2"],
+            "destination_zone_id": ["2", "3"],
+            "checkpoint_node_id": ["C1", "C2"],
+        })
+        manual_df.to_csv(manual_csv, index=False)
+        
+        # Mock config con Path correcto
+        mock_config = MagicMock()
+        mock_config.routing.manual_selection.enabled = True
+        mock_config.routing.manual_selection.file = str(manual_csv)
+        processor.config = mock_config
+        
+        # Ejecutar
+        processor.load_manual_checkpoints()
+        
+        assert processor.manual_checkpoints is not None
+        assert len(processor.manual_checkpoints) == 2
+    
+    def test_load_manual_checkpoints_disabled(self) -> None:
+        """load_manual_checkpoints retorna None si enabled=False."""
+        processor = KIDORawProcessor()
+        
+        mock_config = MagicMock()
+        mock_config.routing.manual_selection.enabled = False
+        processor.config = mock_config
+        
+        processor.load_manual_checkpoints()
+        
+        assert processor.manual_checkpoints is None
+
+
 class TestKIDORawProcessorIntegration:
     """Tests de integración completa."""
 

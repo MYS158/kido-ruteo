@@ -79,6 +79,8 @@ class RoutingConfig:
     ponderadores: Dict[str, float]
     restricciones: Dict[str, Any]
     network: Dict[str, Path]
+    centroids: CentroidsConfig
+    manual_selection: ManualSelectionConfig
     mc: Dict[str, Any]
     mc2: Dict[str, Any]
 
@@ -96,6 +98,8 @@ class RoutingConfig:
             ponderadores=dict(routing_block.get("ponderadores", ROUTING_DEFAULT["routing"]["ponderadores"])),
             restricciones=dict(routing_block.get("restricciones", ROUTING_DEFAULT["routing"]["restricciones"])),
             network=network_paths,
+            centroids=CentroidsConfig.from_dict(data),
+            manual_selection=ManualSelectionConfig.from_dict(data),
             mc=dict(data.get("mc", ROUTING_DEFAULT["mc"])),
             mc2=dict(data.get("mc2", ROUTING_DEFAULT["mc2"])),
         )
@@ -119,6 +123,38 @@ class ValidationConfig:
             calibracion=dict(data.get("calibracion", VALIDATION_DEFAULT["calibracion"])),
             checks_logicos=dict(data.get("checks_logicos", VALIDATION_DEFAULT["checks_logicos"])),
             campos_salida=dict(data.get("campos_salida", VALIDATION_DEFAULT["campos_salida"])),
+        )
+
+
+@dataclass
+class CentroidsConfig:
+    method: str
+    recompute: bool
+    output: Path
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "CentroidsConfig":
+        centroids_block = data.get("centroids", ROUTING_DEFAULT.get("centroids", {}))
+        return cls(
+            method=str(centroids_block.get("method", "degree")),
+            recompute=bool(centroids_block.get("recompute", False)),
+            output=_to_path(centroids_block.get("output", "data/network/centroids.gpkg")),
+        )
+
+
+@dataclass
+class ManualSelectionConfig:
+    enabled: bool
+    file: Path
+    matching_keys: list[str]
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "ManualSelectionConfig":
+        manual_block = data.get("manual_selection", ROUTING_DEFAULT.get("manual_selection", {}))
+        return cls(
+            enabled=bool(manual_block.get("enabled", True)),
+            file=_to_path(manual_block.get("file", "data/raw/inputs/manual_pair_checkpoints.csv")),
+            matching_keys=list(manual_block.get("matching_keys", ["origin_zone_id", "destination_zone_id"])),
         )
 
 

@@ -48,10 +48,20 @@ ROUTING_DEFAULT: dict[str, Any] = {
         },
     },
     "network": {
-        "nodos": "data/network/nodes.gpkg",
-        "arcos": "data/network/edges.gpkg",
+        "nodos": "data/raw/network/nodes.gpkg",
+        "arcos": "data/raw/network/edges.gpkg",
         "centroides": "data/network/centroids.gpkg",
-        "geometrias_aux": "data/network/auxiliary.gpkg",
+        "geometrias_aux": "data/raw/network/auxiliary.gpkg",
+    },
+    "centroids": {
+        "method": "degree",
+        "recompute": False,
+        "output": "data/network/centroids.gpkg",
+    },
+    "manual_selection": {
+        "enabled": True,
+        "file": "data/raw/inputs/manual_pair_checkpoints.csv",
+        "matching_keys": ["origin_zone_id", "destination_zone_id"],
     },
     "mc": {
         "habilitado": True,
