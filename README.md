@@ -66,9 +66,61 @@ kido-ruteo/
 
 El pipeline completo sigue esta secuencia:
 
+### **Fase 0: Preparación de red vial** ⭐ NUEVO
+Antes de ejecutar el pipeline principal, es necesario generar o preparar los datos de red:
+
+#### Opción A: Generar red sintética (para pruebas)
+```bash
+python scripts/generate_network.py
+```
+Esto genera:
+- `data/network/synthetic/nodes.gpkg`: Nodos desde centroides de zonas
+- `data/network/synthetic/edges.gpkg`: Conexiones por proximidad
+
+**Parámetros configurables:**
+```bash
+python scripts/generate_network.py \
+  --zones data/raw/geografia/mi_archivo.geojson \
+  --output data/network/custom \
+  --max-connections 8 \
+  --max-distance 30
+```
+
+#### Opción B: Usar red vial real (recomendado para producción)
+Reemplazar el script `generate_network.py` con uno que lea:
+- Shapefiles de calles del municipio
+- Datos de OpenStreetMap (OSM)
+- Base de datos oficial de red vial
+
+**Requisitos mínimos:**
+- `nodes.gpkg`: Debe tener columnas `node_id`, `zone_id`, `geometry`
+- `edges.gpkg`: Debe tener columnas `u`, `v`, `length`, `speed`, `primary_class`, `geometry`
+
+#### Asignar nodos a datos OD
+Una vez generada la red, asignar nodos a las zonas origen/destino:
+```bash
+python scripts/assign_nodes_to_od.py
+```
+
+Esto genera `data/interim/kido_interim_with_nodes.csv` con columnas:
+- `origin_node_id`: Nodo asignado a zona origen
+- `destination_node_id`: Nodo asignado a zona destino
+
+**Parámetros personalizables:**
+```bash
+python scripts/assign_nodes_to_od.py \
+  --od data/interim/mi_od.csv \
+  --nodes data/network/synthetic/nodes.gpkg \
+  --output data/interim/od_with_nodes.csv \
+  --origin-col zona_origen \
+  --dest-col zona_destino
+```
+
+---
+
 ### 1. **Carga de datos**  
 - KIDO raw (viajes origen-destino)
-- Red vial (nodos, arcos, geometrías)
+- Red vial (nodos, arcos, geometrías) ⚠️ Requiere ejecución previa de Fase 0
 - Zonas geográficas (polígonos)
 - Cardinalidad (sentidos de vías)
 - Aforos (factores de expansión)
@@ -246,6 +298,118 @@ umbrales_congruencia:
 
 ## ▶️ Cómo usar el proyecto
 
+### 🔄 Flujo completo de ejecución
+
+#### **Paso 1: Preparar entorno**
+```bash
+# Instalar dependencias
+pip install -r requirements.txt
+
+# Instalar el paquete en modo desarrollo (opcional)
+pip install -e .
+```
+
+#### **Paso 2: Generar red vial** ⭐ CRÍTICO
+```bash
+# Generar red sintética desde zonas geográficas
+python scripts/generate_network.py
+
+# O especificar parámetros personalizados
+python scripts/generate_network.py \
+  --zones data/raw/geografia/470-458_kido_geografico.geojson \
+  --output data/network/synthetic \
+  --max-connections 5 \
+  --max-distance 20
+```
+
+**Salidas esperadas:**
+- ✅ `data/network/synthetic/nodes.gpkg` (154 nodos)
+- ✅ `data/network/synthetic/edges.gpkg` (~924 edges)
+
+**Nota:** Para producción, reemplazar con script que lea red vial real (OSM, shapefiles municipales, etc.)
+
+#### **Paso 3: Asignar nodos a datos OD**
+```bash
+# Asignar origin_node_id y destination_node_id a los datos KIDO
+python scripts/assign_nodes_to_od.py
+
+# O especificar archivos personalizados
+python scripts/assign_nodes_to_od.py \
+  --od data/interim/kido_interim.csv \
+  --nodes data/network/synthetic/nodes.gpkg \
+  --output data/interim/kido_interim_with_nodes.csv
+```
+
+**Salida esperada:**
+- ✅ `data/interim/kido_interim_with_nodes.csv` con columnas `origin_node_id` y `destination_node_id` pobladas
+
+**Validación:**
+```bash
+# Verificar asignación de nodos
+python -c "import pandas as pd; df = pd.read_csv('data/interim/kido_interim_with_nodes.csv'); print(f'Total: {len(df)}'); print(f'Con nodos: {df[\"origin_node_id\"].notna().sum()}')"
+```
+
+#### **Paso 4: Ejecutar pipeline de routing**
+```bash
+# Pipeline completo: MC, MC2, ratio X, congruencias
+python src/scripts/run_pipeline.py
+
+# O solo routing
+python src/scripts/generate_matrices.py
+```
+
+**Salidas esperadas:**
+- ✅ `data/processed/routing/routing_results.csv`: Resultados de MC y MC2
+- ✅ Métricas de ratio X y clasificación de congruencias
+- ✅ Archivos de validación
+
+#### **Paso 5: Análisis de resultados**
+```bash
+# Validar inconsistencias
+python scripts/analyze_inconsistencies.py
+
+# Test con checkpoints manuales
+python scripts/test_manual_checkpoints.py
+
+# Test completo con datos reales
+python scripts/test_routing_with_real_data.py
+```
+
+---
+
+### 📊 Scripts de prueba disponibles
+
+#### `test_routing_with_real_data.py`
+Prueba completa del pipeline usando red sintética generada desde zonas reales:
+```bash
+python scripts/test_routing_with_real_data.py
+```
+- Crea red sintética de 154 nodos
+- Genera 20 pares OD de muestra
+- Ejecuta routing completo
+- Valida coherencia (MC2 ≥ MC, ratio X ≥ 1.0)
+- Detecta inconsistencias
+
+#### `test_manual_checkpoints.py`
+Valida funcionamiento de checkpoints manuales vs automáticos:
+```bash
+python scripts/test_manual_checkpoints.py
+```
+- Compara ratio X con checkpoints AUTO vs MANUAL
+- Valida que checkpoints manuales fuerzan desviaciones
+- Verifica coherencia de rutas
+
+#### `analyze_inconsistencies.py`
+Análisis detallado de resultados del routing:
+```bash
+python scripts/analyze_inconsistencies.py
+```
+- Detecta ratio X < 1.0 (errores reales vs precisión numérica)
+- Identifica MC2 < MC (con epsilon de tolerancia)
+- Estadísticas de paths idénticos
+
+---
+
 ### 1. Instalar dependencias
 ```bash
 pip install -r requirements.txt
@@ -269,6 +433,59 @@ data_raw: data/raw/
 data_processed: data/processed/
 network: data/network/
 ```
+
+Ejemplo (routing.yaml):
+```yaml
+routing:
+  weight: weight                      # Atributo de peso para routing
+  checkpoint:
+    mode: auto                        # auto | manual
+    percent_lower: 0.40               # Percentil inferior para auto checkpoint
+    percent_upper: 0.60               # Percentil superior para auto checkpoint
+  output_dir: data/processed/routing
+
+network:
+  directory: data/network/synthetic   # ⚠️ Ajustar según ubicación de red generada
+```
+
+---
+
+### ⚠️ Troubleshooting
+
+#### Error: "Archivo de red no existe"
+```bash
+# Ejecutar primero la generación de red
+python scripts/generate_network.py
+```
+
+#### Error: "origin_node_id es NULL"
+```bash
+# Ejecutar primero la asignación de nodos
+python scripts/assign_nodes_to_od.py
+```
+
+#### Error: "No hay ruta entre nodos X y Y"
+Causas posibles:
+- Red desconectada (nodos aislados)
+- Distancia máxima muy pequeña en generación de red
+- Zonas sin nodos asignados
+
+Solución:
+```bash
+# Regenerar red con mayor conectividad
+python scripts/generate_network.py --max-connections 8 --max-distance 30
+```
+
+#### Validación de precisión numérica
+Los errores de punto flotante del orden de 10⁻⁶ o menores son normales:
+- `ratio_x = 0.9999999999`: No es error real, es precisión de float64
+- `MC2 - MC = -0.0000000001m`: No es inconsistencia real
+
+Los scripts usan epsilon automáticamente:
+- `epsilon_ratio = 1e-9` para ratio X
+- `epsilon_m = 1e-6` para distancias (1 micrómetro)
+
+---
 
 ## ▶️ Ejecutar el pipeline completo
 ```bash
