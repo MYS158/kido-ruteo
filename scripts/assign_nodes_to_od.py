@@ -62,21 +62,26 @@ def assign_nodes_to_od(
     gdf_nodes = gpd.read_file(nodes_file)
     logger.info("  ✓ Cargados %d nodos", len(gdf_nodes))
     
-    # Validar que nodos tienen zone_id
-    if "zone_id" not in gdf_nodes.columns:
+    # Validar que nodos tienen zone_id o zone_name
+    if "zone_id" in gdf_nodes.columns:
+        zone_col = "zone_id"
+    elif "zone_name" in gdf_nodes.columns:
+        zone_col = "zone_name"
+        logger.info("  ✓ Usando zone_name para mapeo")
+    else:
         raise ValueError(
-            f"Archivo de nodos debe tener columna 'zone_id'. "
+            f"Archivo de nodos debe tener columna 'zone_id' o 'zone_name'. "
             f"Columnas disponibles: {gdf_nodes.columns.tolist()}"
         )
     
-    # 3. Crear mapeo zona → nodo
-    logger.info("Creando mapeo zona → nodo...")
-    zone_to_node = dict(zip(gdf_nodes["zone_id"], gdf_nodes["node_id"]))
+    # 3. Crear mapeo zona → nodo (convertir ambos lados a string para consistencia)
+    logger.info("Creando mapeo zona → nodo (columna: %s)...", zone_col)
+    zone_to_node = {str(z): n for z, n in zip(gdf_nodes[zone_col], gdf_nodes["node_id"]) if pd.notna(z)}
     logger.info("  ✓ Mapeo creado para %d zonas", len(zone_to_node))
     
-    # 4. Asignar nodos a orígenes
+    # 4. Asignar nodos a orígenes (convertir a string para match consistente)
     logger.info("Asignando nodos a orígenes...")
-    df_od["origin_node_id"] = df_od[origin_col].map(zone_to_node)
+    df_od["origin_node_id"] = df_od[origin_col].astype(str).map(zone_to_node)
     
     # Contar asignaciones exitosas
     n_origin_assigned = df_od["origin_node_id"].notna().sum()
@@ -92,9 +97,9 @@ def assign_nodes_to_od(
         missing_zones = df_od[df_od["origin_node_id"].isna()][origin_col].unique()
         logger.warning("     Zonas sin nodo: %s", missing_zones[:10])
     
-    # 5. Asignar nodos a destinos
+    # 5. Asignar nodos a destinos (convertir a string para match consistente)
     logger.info("Asignando nodos a destinos...")
-    df_od["destination_node_id"] = df_od[dest_col].map(zone_to_node)
+    df_od["destination_node_id"] = df_od[dest_col].astype(str).map(zone_to_node)
     
     n_dest_assigned = df_od["destination_node_id"].notna().sum()
     n_dest_missing = df_od["destination_node_id"].isna().sum()

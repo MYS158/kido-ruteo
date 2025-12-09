@@ -124,9 +124,56 @@ def _prepare_dataframe(
         logger.warning("Columnas de merge no encontradas en routing; retornando sin merge")
         return df_routing.copy()
     
-    merged = df_routing.merge(df_processed, on=merge_cols, how="left", suffixes=("", "_proc"))
+    # Asegurar que los tipos sean consistentes para merge
+    # Solo procesar las filas que tienen valores válidos en node IDs
+    df_routing_typed = df_routing.copy()
+    df_processed_typed = df_processed.copy()
+    
+    # Filtrar filas con nodos válidos en processed antes del merge
+    valid_mask = df_processed_typed[merge_cols].notna().all(axis=1)
+    df_processed_typed = df_processed_typed[valid_mask].copy()
+    
+    # Verificar diversidad de datos para evitar productos cartesianos masivos
+    unique_pairs_routing = df_routing_typed[merge_cols].drop_duplicates()
+    unique_pairs_processed = df_processed_typed[merge_cols].drop_duplicates()
+    
+    if len(unique_pairs_routing) < 10 and len(unique_pairs_processed) < 10:
+        logger.warning(
+            "Datos insuficientemente diversos para merge seguro "
+            "(routing: %d pares únicos, processed: %d pares únicos). "
+            "Posible problema de centroides. Retornando solo routing data.",
+            len(unique_pairs_routing),
+            len(unique_pairs_processed)
+        )
+        return df_routing_typed
+    
+    # Reducir columnas de processed para optimizar merge
+    essential_proc_cols = [col for col in df_processed_typed.columns if col not in df_routing_typed.columns or col in merge_cols]
+    df_processed_typed = df_processed_typed[essential_proc_cols]
+    
+    for col in merge_cols:
+        if col in df_routing_typed.columns:
+            df_routing_typed[col] = df_routing_typed[col].astype("int64")
+        if col in df_processed_typed.columns:
+            df_processed_typed[col] = df_processed_typed[col].astype("int64")
+    
+    # Optimizar merge con copy=False para reducir uso de memoria
+    merged = df_routing_typed.merge(df_processed_typed, on=merge_cols, how="left", suffixes=("", "_proc"), copy=False)
+    
     if df_aforo is not None and not df_aforo.empty:
-        merged = merged.merge(df_aforo, on=merge_cols, how="left", suffixes=("", "_aforo"))
+        # Filtrar aforo y convertir tipos
+        df_aforo_typed = df_aforo.copy()
+        valid_mask_aforo = df_aforo_typed[merge_cols].notna().all(axis=1)
+        df_aforo_typed = df_aforo_typed[valid_mask_aforo].copy()
+        
+        # Reducir columnas de aforo
+        essential_aforo_cols = [col for col in df_aforo_typed.columns if col not in merged.columns or col in merge_cols]
+        df_aforo_typed = df_aforo_typed[essential_aforo_cols]
+        
+        for col in merge_cols:
+            if col in df_aforo_typed.columns:
+                df_aforo_typed[col] = df_aforo_typed[col].astype("int64")
+        merged = merged.merge(df_aforo_typed, on=merge_cols, how="left", suffixes=("", "_aforo"), copy=False)
     return merged
 
 

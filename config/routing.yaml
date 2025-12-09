@@ -29,7 +29,7 @@ network:
 
 centroids:
   method: degree                     # degree | betweenness | closeness | eigenvector
-  recompute: false                   # true = forzar recalculo aunque exista centroids.gpkg
+  recompute: true                    # Forzar recálculo (centroids.gpkg anterior tenía problemas)
   output: data/network/centroids.gpkg
 
 manual_selection:

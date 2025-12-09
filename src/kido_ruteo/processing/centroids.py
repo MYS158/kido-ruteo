@@ -245,6 +245,50 @@ def save_centroids(gdf_centroids: Any, output_path: Path) -> None:
     logger.info("Centroides guardados en %s", output_path)
 
 
+def validate_centroids(gdf_centroids: Any) -> dict:
+    """Valida que el archivo de centroides tenga distribución razonable.
+    
+    Retorna dict con:
+        - is_valid: bool
+        - num_unique_nodes: int
+        - total_zones: int
+        - diversity_pct: float (% de zonas con nodos únicos)
+        - warning_msg: str (si hay problemas)
+    """
+    if gdf_centroids is None or len(gdf_centroids) == 0:
+        return {
+            "is_valid": False,
+            "num_unique_nodes": 0,
+            "total_zones": 0,
+            "diversity_pct": 0.0,
+            "warning_msg": "GeoDataFrame vacío o None",
+        }
+    
+    unique_nodes = gdf_centroids["centroid_node_id"].nunique()
+    total_zones = len(gdf_centroids)
+    diversity_pct = 100.0 * unique_nodes / total_zones if total_zones > 0 else 0.0
+    
+    # Alertar si menos del 30% de zonas tienen nodos únicos
+    is_valid = diversity_pct >= 30.0
+    
+    if not is_valid:
+        warning_msg = (
+            f"CRÍTICO: Centroides con baja diversidad ({diversity_pct:.1f}% únicos). "
+            f"Solo {unique_nodes} nodos únicos para {total_zones} zonas. "
+            f"Considere regenerar con recompute=true o usar od_with_nodes.csv"
+        )
+    else:
+        warning_msg = None
+    
+    return {
+        "is_valid": is_valid,
+        "num_unique_nodes": int(unique_nodes),
+        "total_zones": int(total_zones),
+        "diversity_pct": float(diversity_pct),
+        "warning_msg": warning_msg,
+    }
+
+
 def load_centroids(input_path: Path) -> Any:
     """Carga centroides desde archivo GeoPackage."""
     if gpd is None:
@@ -255,4 +299,10 @@ def load_centroids(input_path: Path) -> Any:
 
     gdf = gpd.read_file(input_path, layer="centroids")
     logger.info("Centroides cargados desde %s: %d registros", input_path, len(gdf))
+    
+    # Validar centroides cargados
+    validation = validate_centroids(gdf)
+    if validation["warning_msg"]:
+        logger.warning(validation["warning_msg"])
+    
     return gdf

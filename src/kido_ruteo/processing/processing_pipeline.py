@@ -228,9 +228,9 @@ class KIDORawProcessor:
         logger.info("Paso 1: Limpieza de datos")
         df = clean_kido(self.raw_df)
 
-        # Paso 2: Asignar nodos desde centroides
+        # Paso 2: Asignar nodos desde od_with_nodes.csv (preferido) o centroides (fallback)
         logger.info("Paso 2: Asignando nodos origen/destino")
-        df = self._assign_nodes_from_centroids(df)
+        df = self._assign_nodes_from_od_with_nodes(df)
 
         # Paso 3: total_trips_modif ya se aplica en clean_kido
 
@@ -255,6 +255,81 @@ class KIDORawProcessor:
 
         return df
 
+    def _assign_nodes_from_od_with_nodes(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Asigna origin_node_id y destination_node_id desde od_with_nodes.csv.
+        
+        Este método es preferible a _assign_nodes_from_centroids ya que usa
+        asignaciones pre-calculadas y validadas en lugar de depender de un archivo
+        de centroides que puede tener errores (ej: todas las zonas al mismo nodo).
+        """
+        od_nodes_path = Path(self.paths_cfg.data_interim) / "od_with_nodes.csv"
+        
+        if not od_nodes_path.exists():
+            logger.warning(
+                "Archivo od_with_nodes.csv no encontrado en %s. "
+                "Fallando a asignación de centroides", 
+                od_nodes_path
+            )
+            return self._assign_nodes_from_centroids(df)
+        
+        try:
+            df_od_nodes = pd.read_csv(od_nodes_path)
+            logger.info("Cargado od_with_nodes.csv con %d pares", len(df_od_nodes))
+        except Exception as exc:
+            logger.error("Error cargando od_with_nodes.csv: %s. Fallando a centroides", exc)
+            return self._assign_nodes_from_centroids(df)
+        
+        df = df.copy()
+        
+        # Crear mapeos OD -> nodos desde od_with_nodes
+        od_to_nodes = {}
+        for idx, row in df_od_nodes.iterrows():
+            origin_id = str(row.get("origin"))
+            dest_id = str(row.get("destination"))
+            origin_node = row.get("origin_node_id")
+            dest_node = row.get("destination_node_id")
+            
+            if pd.notna(origin_node) and pd.notna(dest_node):
+                od_to_nodes[(origin_id, dest_id)] = (origin_node, dest_node)
+        
+        # Aplicar mapeos
+        origin_nodes = []
+        dest_nodes = []
+        not_found = 0
+        
+        for idx, row in df.iterrows():
+            origin_id = str(row.get("origin_id"))
+            dest_id = str(row.get("destination_id"))
+            
+            if (origin_id, dest_id) in od_to_nodes:
+                on, dn = od_to_nodes[(origin_id, dest_id)]
+                origin_nodes.append(on)
+                dest_nodes.append(dn)
+            else:
+                origin_nodes.append(None)
+                dest_nodes.append(None)
+                not_found += 1
+        
+        df["origin_node_id"] = origin_nodes
+        df["destination_node_id"] = dest_nodes
+        
+        if not_found > 0:
+            logger.warning(
+                "%d pares OD no encontrados en od_with_nodes.csv. "
+                "Se asignarán como NaN", 
+                not_found
+            )
+        
+        assigned = (~df["origin_node_id"].isna()).sum()
+        logger.info(
+            "Nodos asignados desde od_with_nodes.csv: %d/%d pares (%.1f%%)",
+            assigned,
+            len(df),
+            100.0 * assigned / len(df) if len(df) > 0 else 0
+        )
+        
+        return df
+
     def _assign_nodes_from_centroids(self, df: pd.DataFrame) -> pd.DataFrame:
         """Asigna origin_node_id y destination_node_id desde centroides."""
         if self.centroids_gdf is None:
@@ -264,6 +339,18 @@ class KIDORawProcessor:
             return df
 
         df = df.copy()
+        
+        # Validar diversidad de centroides
+        unique_nodes = self.centroids_gdf["centroid_node_id"].nunique()
+        total_zones = len(self.centroids_gdf)
+        
+        if unique_nodes < total_zones * 0.5:  # Si menos del 50% de zonas tienen nodos únicos
+            logger.warning(
+                "ALERTA: Centroides con baja diversidad (%.1f%% zonas tienen nodos únicos). "
+                "Posible error en el archivo de centroides. "
+                "Considere regenerar con recompute=true o usar od_with_nodes.csv",
+                100.0 * unique_nodes / total_zones
+            )
 
         # Crear mapeo zone_id -> centroid_node_id
         zone_to_node = {}

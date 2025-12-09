@@ -117,6 +117,12 @@ def run_routing_pipeline(
         origin = row["origin_node_id"]
         destination = row["destination_node_id"]
         
+        # Convertir a int si son floats (evita problemas con graph.nodes())
+        if pd.notna(origin):
+            origin = int(origin)
+        if pd.notna(destination):
+            destination = int(destination)
+        
         if idx % 100 == 0 and idx > 0:
             logger.info("Procesando par %d/%d", idx + 1, total_pairs)
         

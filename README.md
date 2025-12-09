@@ -488,68 +488,25 @@ Los scripts usan epsilon automáticamente:
 ---
 
 ## ▶️ Ejecutar el pipeline completo
-
-### Mediante CLI
 ```bash
-python src/kido_ruteo/scripts/run_full_pipeline.py
+py src/scripts/run_pipeline.py
 ```
+El script ejecutará:
+- Limpieza →
+- Matrices →
+- Ruteo →
+- Validación →
+- Exportación
+Los resultados aparecerán en `data/processed/`.
 
-El script ejecutará Fases B, C y D:
-- **Fase B**: Limpieza y procesamiento de viajes OD
-- **Fase C**: Cálculo de rutas (MC, MC2, checkpoints automáticos)
-- **Fase D**: Validación y asignación de congruencias
-
-#### Opciones disponibles:
+## ▶️ Ejecutar solo el ruteo
 ```bash
-# Usar archivo de configuración personalizado
-python src/kido_ruteo/scripts/run_full_pipeline.py \
-  --config-paths config/paths.yaml \
-  --config-routing config/routing.yaml \
-  --config-validation config/validation.yaml
-
-# No remapear nodos desconectados (por defecto se remapean)
-python src/kido_ruteo/scripts/run_full_pipeline.py --no-fix-disconnected-nodes
-
-# Habilitar exportación a GeoJSON
-python src/kido_ruteo/scripts/run_full_pipeline.py --export-geojson
-```
-
-### Mediante Python
-```python
-from kido_ruteo.pipeline import run_kido_pipeline
-from kido_ruteo.config.loader import ConfigLoader
-
-# Cargar configuración
-cfg = ConfigLoader.load_all()
-
-# Ejecutar pipeline
-result = run_kido_pipeline(cfg, fix_disconnected_nodes=True)
-
-# Acceder a resultados
-df_processed = result["processed"]   # Viajes procesados (Fase B)
-df_routing = result["routing"]       # Rutas calculadas (Fase C)
-df_validation = result["validation"] # Viajes validados (Fase D)
-```
-
-Los resultados se guardan en `data/processed/final/` con estructura:
-```
-final/
-├── cleaned/                         # Datos procesados de Fase B
-│   └── processed.csv
-├── routing/                         # Resultados de ruteo (Fase C)
-│   ├── routing_results.csv
-│   └── mapping_disconnected_nodes.csv  # Nodos remapeados
-├── validation/                      # Resultados de validación (Fase D)
-│   ├── validation_results.csv
-│   └── validation_results.geojson (si --export-geojson)
-└── logs/
-    └── pipeline.log
+py src/scripts/generate_matrices.py
 ```
 
 ## 🧪 Pruebas
 ```bash
 pytest tests/
-pytest tests/test_pipeline_master.py -v    # Tests del pipeline maestro
 ```
 
 ## 📘 Documentación
