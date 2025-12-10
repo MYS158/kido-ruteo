@@ -1,7 +1,0 @@
-pandas
-geopandas
-shapely
-networkx
-numpy
-pyyaml
-click
