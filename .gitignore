@@ -41,6 +41,7 @@ wheels/
 *.egg
 
 # IDEs
+.vs/
 .vscode/
 .idea/
 *.swp
