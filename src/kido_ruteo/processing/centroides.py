@@ -98,89 +98,22 @@ def add_centroid_coordinates_to_od(
         dest_col: Nombre de columna de destino
         
     Returns:
-        DataFrame OD con coordenadas de centroides añadidas
+        DataFrame con coordenadas añadidas
     """
-    print("  Añadiendo coordenadas de centroides a datos OD...")
-    
-    df_od = df_od.copy()
-    
     # Merge para origen
     df_od = df_od.merge(
-        df_centroids[['zone_id', 'centroid_x', 'centroid_y', 'node_id']],
+        df_centroids[['zone_id', 'centroid_x', 'centroid_y']],
         left_on=origin_col,
         right_on='zone_id',
-        how='left',
-        suffixes=('', '_origin')
-    )
-    df_od = df_od.rename(columns={
-        'centroid_x': 'x_o',
-        'centroid_y': 'y_o',
-        'node_id': 'origin_node_id'
-    })
-    df_od = df_od.drop(columns=['zone_id'], errors='ignore')
+        how='left'
+    ).rename(columns={'centroid_x': 'x_o', 'centroid_y': 'y_o'}).drop(columns=['zone_id'])
     
     # Merge para destino
     df_od = df_od.merge(
-        df_centroids[['zone_id', 'centroid_x', 'centroid_y', 'node_id']],
+        df_centroids[['zone_id', 'centroid_x', 'centroid_y']],
         left_on=dest_col,
         right_on='zone_id',
-        how='left',
-        suffixes=('', '_dest')
-    )
-    df_od = df_od.rename(columns={
-        'centroid_x': 'x_d',
-        'centroid_y': 'y_d',
-        'node_id': 'destination_node_id'
-    })
-    df_od = df_od.drop(columns=['zone_id'], errors='ignore')
-    
-    # Verificar asignación
-    assigned_origins = df_od['x_o'].notna().sum()
-    assigned_dests = df_od['x_d'].notna().sum()
-    
-    print(f"    ✓ Orígenes con centroide: {assigned_origins}/{len(df_od)}")
-    print(f"    ✓ Destinos con centroide: {assigned_dests}/{len(df_od)}")
+        how='left'
+    ).rename(columns={'centroid_x': 'x_d', 'centroid_y': 'y_d'}).drop(columns=['zone_id'])
     
     return df_od
-
-
-def compute_centroids(
-    df_od: pd.DataFrame,
-    df_centrality: pd.DataFrame,
-    zones_gdf: gpd.GeoDataFrame,
-    origin_col: str = 'origin_id',
-    dest_col: str = 'destination_id',
-    zone_id_col: str = 'zone_id',
-    metric: str = 'betweenness'
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
-    """
-    Ejecuta proceso completo de selección de centroides (Paso 2B KIDO).
-    
-    Args:
-        df_od: DataFrame con datos OD
-        df_centrality: DataFrame con centralidades de nodos
-        zones_gdf: GeoDataFrame con zonas
-        origin_col: Nombre de columna de origen
-        dest_col: Nombre de columna de destino
-        zone_id_col: Nombre de columna de ID de zona
-        metric: Métrica de centralidad para selección
-        
-    Returns:
-        Tupla (df_od_with_coords, df_centroids)
-    """
-    print("=" * 60)
-    print("PASO 2B: Selección de Centroides")
-    print("=" * 60)
-    
-    # Asignar nodos a zonas
-    df_nodes_with_zones = assign_nodes_to_zones(df_centrality, zones_gdf, zone_id_col)
-    
-    # Seleccionar centroides
-    df_centroids = select_zone_centroids(df_nodes_with_zones, metric)
-    
-    # Añadir coordenadas a datos OD
-    df_od_with_coords = add_centroid_coordinates_to_od(df_od, df_centroids, origin_col, dest_col)
-    
-    print(f"\n✓ Proceso completado")
-    
-    return df_od_with_coords, df_centroids

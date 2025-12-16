@@ -97,19 +97,7 @@ def prepare_data(
 def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normaliza nombres de columnas a snake_case.
-    
-    Args:
-        df: DataFrame a normalizar
-        
-    Returns:
-        DataFrame con columnas normalizadas
     """
     df = df.copy()
-    df.columns = (
-        df.columns
-        .str.lower()
-        .str.replace(' ', '_')
-        .str.replace('-', '_')
-        .str.strip()
-    )
+    df.columns = df.columns.str.strip().str.lower().str.replace(' ', '_').str.replace('-', '_')
     return df

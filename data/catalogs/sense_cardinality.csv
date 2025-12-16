@@ -1,0 +1,18 @@
+sentido,acceso,movimiento,origen,destino,tipo,cardinalidad,bidireccional,descripcion
+1-3,1,3,Norte,Sur,Directo,NS,false,Norte a Sur directo
+1-4,1,4,Norte,Poniente,Izquierda,NP,false,Giro izquierda
+1-2,1,2,Norte,Oriente,Derecha,NE,false,Giro derecha
+1-1,1,1,Norte,Norte,U,NN,false,Giro en U
+3-1,3,1,Sur,Norte,Directo,SN,false,Sur a Norte directo
+3-4,3,4,Sur,Poniente,Izquierda,SP,false,
+3-2,3,2,Sur,Oriente,Derecha,SE,false,
+3-3,3,3,Sur,Sur,U,SS,false,
+4-2,4,2,Poniente,Oriente,Directo,PO,false,
+4-1,4,1,Poniente,Norte,Izquierda,PN,false,
+4-3,4,3,Poniente,Sur,Derecha,PS,false,
+4-4,4,4,Poniente,Poniente,U,PP,false,
+2-4,2,4,Oriente,Poniente,Directo,OP,false,
+2-3,2,3,Oriente,Sur,Izquierda,OS,false,
+2-1,2,1,Oriente,Norte,Derecha,ON,false,
+2-2,2,2,Oriente,Oriente,U,OO,false,
+0,,,,,,,true,Ambos sentidos

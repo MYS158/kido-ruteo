@@ -1,15 +1,9 @@
 """
-Paso 4 del flujo KIDO: Validación KIDO vs Dato Vial.
-
-Calcula:
-- VolDV_personas = dato_vial × factor_ocupación (por tipología A, B, C)
-- Factor = VolDV_personas / VolKIDO
-- Validación: 0.95 < Factor < 1.05 → válido
+Módulo de chequeos de validación (E1, E2).
 """
 
 import pandas as pd
 from typing import Dict
-
 
 # Factores de ocupación por tipología (valores por defecto)
 FACTORES_OCUPACION = {
@@ -17,7 +11,6 @@ FACTORES_OCUPACION = {
     'B': 2.5,  # Buses
     'C': 1.2   # Otros vehículos
 }
-
 
 def calculate_vol_dv_personas(
     df: pd.DataFrame,
@@ -46,14 +39,13 @@ def calculate_vol_dv_personas(
     
     return df
 
-
 def calculate_validation_factor(
     df: pd.DataFrame,
     vol_dv_col: str = 'vol_dv_personas',
     vol_kido_col: str = 'vol_kido'
 ) -> pd.DataFrame:
     """
-    Calcula factor de validación.
+    Calcula factor de validación (E1/E2).
     
     Factor = VolDV_personas / VolKIDO
     
@@ -73,7 +65,6 @@ def calculate_validation_factor(
     df['factor_validacion'] = df['factor_validacion'].replace([float('inf'), -float('inf')], None)
     
     return df
-
 
 def validate_consistency(
     df: pd.DataFrame,
@@ -98,60 +89,8 @@ def validate_consistency(
     df = df.copy()
     
     df['es_valido'] = (
-        (df[factor_col] >= lower_threshold) &
-        (df[factor_col] <= upper_threshold)
-    )
-    
-    df['observacion'] = df['es_valido'].apply(
-        lambda x: 'Válido' if x else 'Consulta no confiable - preferir dato de campo'
+        (df[factor_col] > lower_threshold) & 
+        (df[factor_col] < upper_threshold)
     )
     
     return df
-
-
-def validate_kido_vs_vial(
-    df_kido: pd.DataFrame,
-    df_vial: pd.DataFrame,
-    factores: Dict[str, float] = FACTORES_OCUPACION
-) -> pd.DataFrame:
-    """
-    Ejecuta validación completa KIDO vs Dato Vial (Paso 4 KIDO).
-    
-    Args:
-        df_kido: DataFrame con volúmenes KIDO
-        df_vial: DataFrame con datos viales
-        factores: Factores de ocupación por tipología
-        
-    Returns:
-        DataFrame con validación completa
-    """
-    print("=" * 60)
-    print("PASO 4: Validación KIDO vs Dato Vial")
-    print("=" * 60)
-    
-    # Calcular volumen dato vial en personas
-    df_vial = calculate_vol_dv_personas(df_vial, factores=factores)
-    print(f"✓ Calculado vol_dv_personas para {len(df_vial)} registros")
-    
-    # Merge KIDO con vial
-    df_merged = df_kido.merge(df_vial, on=['origin_id', 'destination_id'], how='left')
-    
-    # Calcular factor de validación
-    df_merged = calculate_validation_factor(df_merged)
-    print(f"✓ Calculado factor_validacion")
-    
-    # Validar consistencia
-    df_merged = validate_consistency(df_merged)
-    
-    validos = df_merged['es_valido'].sum()
-    no_validos = (~df_merged['es_valido']).sum()
-    
-    print(f"\n✓ Resultados de validación:")
-    print(f"  - Válidos (0.95 < Factor < 1.05): {validos}")
-    print(f"  - No válidos: {no_validos}")
-    
-    if len(df_merged) > 0:
-        mean_factor = df_merged['factor_validacion'].mean()
-        print(f"  - Factor promedio: {mean_factor:.3f}")
-    
-    return df_merged

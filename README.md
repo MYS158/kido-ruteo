@@ -148,9 +148,20 @@ Viajes = id_congruencia × id_potencial × (1 - intrazonal) × total_trips_modif
 ```
 kido-ruteo/
 ├── data/
+│   ├── catalogs/         # Catálogos de referencia
+│   │   └── sense_cardinality.csv
 │   ├── raw/              # Datos originales
+│   │   ├── queries/      # Datos de encuestas (checkpoint, general)
+│   │   ├── zonification/ # Información geográfica (geojson)
+│   │   ├── chkp2001.xlsx
+│   │   ├── chkp2030.xlsm
+│   │   ├── macrozones.csv
+│   │   ├── ocupation_factor.csv
+│   │   ├── valid_senses_special.csv
+│   │   └── valid_senses_standard.csv
 │   ├── interim/          # Datos intermedios procesados
 │   ├── processed/        # Resultados finales
+│   │   └── resultados_kido_automatizado.xlsx
 │   └── external/         # Datos externos auxiliares
 │
 ├── src/kido_ruteo/       # Paquete principal
@@ -171,6 +182,7 @@ kido-ruteo/
 │
 ├── scripts/              # Scripts ejecutables
 │   ├── ingest.py         # Ingesta de datos desde kido-data2
+│   ├── kido_automation.py      # Script de automatización completo (Flujo unificado)
 │   ├── run_preprocessing.py    # Ejecutar Paso 1
 │   ├── compute_centrality.py   # Ejecutar Paso 2
 │   ├── compute_impedance.py    # Ejecutar Paso 5 (MC)
@@ -180,6 +192,8 @@ kido-ruteo/
 │   └── clean_branches.sh       # Limpieza de ramas Git
 │
 ├── tests/                # Tests unitarios
+│   ├── test_equivalence.py
+│   ├── test_kido_automation.py
 │   └── test_placeholder.py
 │
 ├── notebooks/            # Análisis exploratorio
