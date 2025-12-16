@@ -54,7 +54,7 @@ def compute_mc_matrix(
         dest_node_col: Columna con nodo destino
         
     Returns:
-        DataFrame con columnas dist_mc, time_mc, path_mc
+        DataFrame con columnas mc_distance_m, mc_time_h, mc_path
     """
     print("  Calculando matriz MC (Shortest Path)...")
     
@@ -65,18 +65,18 @@ def compute_mc_matrix(
         
         if pd.isna(origin) or pd.isna(dest):
             results.append({
-                'dist_mc': None,
-                'time_mc': None,
-                'path_mc': None
+                'mc_distance_m': None,
+                'mc_time_h': None,
+                'mc_path': None
             })
             continue
             
         path, dist, time = compute_shortest_path_mc(G, origin, dest)
         
         results.append({
-            'dist_mc': dist,
-            'time_mc': time,
-            'path_mc': str(path) if path else None
+            'mc_distance_m': dist,
+            'mc_time_h': time,
+            'mc_path': str(path) if path else None
         })
         
     return pd.concat([df_od, pd.DataFrame(results)], axis=1)

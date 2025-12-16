@@ -7,26 +7,11 @@ Implementa el flujo metodológico completo KIDO para matrices OD.
 __version__ = "2.0.0"
 __author__ = "KIDO Team"
 
-from . import io
-from . import preprocessing
-from . import centrality
-from . import centroides
-from . import access_vectors
-from . import validation
-from . import impedance
-from . import constrained_paths
+from . import capacity
 from . import congruence
-from . import viajes
+from . import processing
+from . import routing
+from . import trips
+from . import pipeline
 
-__all__ = [
-    "io",
-    "preprocessing",
-    "centrality",
-    "centroides",
-    "access_vectors",
-    "validation",
-    "impedance",
-    "constrained_paths",
-    "congruence",
-    "viajes",
-]
+from .pipeline import run_pipeline

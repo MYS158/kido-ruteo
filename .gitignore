@@ -6,13 +6,8 @@ ENV/
 
 # Data directories - keep structure but ignore content
 data/raw/*
-!data/raw/.gitkeep
 data/interim/*
-!data/interim/.gitkeep
 data/processed/*
-!data/processed/.gitkeep
-data/external/*
-!data/external/.gitkeep
 
 # Jupyter
 *.ipynb_checkpoints
@@ -20,6 +15,7 @@ data/external/*
 
 # Python
 __pycache__/
+cache/
 *.py[cod]
 *$py.class
 *.so
