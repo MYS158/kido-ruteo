@@ -49,15 +49,16 @@ def get_cardinality(bearing, is_origin=False):
 
 def derive_sense_from_path(G: nx.Graph, path: List[str], checkpoint_node: str) -> Optional[str]:
     """
-    STRICT MODE: Deriva el código de sentido (ej. '1-3') desde la GEOMETRÍA.
+    STRICT MODE: Deriva el código de sentido desde la GEOMETRÍA.
     
     El sentido SIEMPRE se calcula geométricamente a partir de la ruta:
     Origen → Checkpoint → Destino
     
-    Usando bearings en el nodo del checkpoint:
-    - Cardinalidad fija: 1=Norte, 2=Este, 3=Sur, 4=Oeste
-    - Formato: "X-Y" donde X=origen, Y=destino
-    - Ej: "4-2" = Viene del Oeste, va al Este
+    Proceso:
+    1. Calcular bearings (dirección) en el checkpoint
+    2. Mapear bearings a cardinalidad: 1=Norte, 2=Este, 3=Sur, 4=Oeste
+    3. Formar código 'origen-destino' (ej: '1-3')
+    4. El código resultante es el sense_code (sin lookup en catálogo)
     
     NUNCA se lee del input. NUNCA se asume. SOLO se deriva.
     """
@@ -89,6 +90,9 @@ def derive_sense_from_path(G: nx.Graph, path: List[str], checkpoint_node: str) -
     # Derived from Outgoing Bearing
     dest_card = get_cardinality(bearing_out, is_origin=False)
     
+    # El código 'origen-destino' ES el sense_code
+    # No se requiere lookup en sense_cardinality.csv
+    # El archivo de capacidad usa el mismo formato (ej: '1-3', '4-2')
     if origin_card and dest_card:
         return f"{origin_card}-{dest_card}"
     return None

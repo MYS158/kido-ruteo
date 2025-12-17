@@ -3,6 +3,7 @@ Orquestador maestro del pipeline KIDO.
 """
 
 import pandas as pd
+import numpy as np
 import geopandas as gpd
 import os
 import logging
