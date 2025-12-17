@@ -4,38 +4,32 @@ import numpy as np
 def normalize_column_names(df: pd.DataFrame) -> pd.DataFrame:
     """
     Normaliza los nombres de columnas del DataFrame OD.
-    """
-    # Mapa de renombramiento estándar
-    rename_map = {
-        'origin': 'origin_id',
-        'destination': 'destination_id',
-        'checkpoint': 'checkpoint_id',
-        'sense': 'sense_code',
-        'total_trips': 'total_trips',
-        'total_trips_modif': 'total_trips_adjusted'
-    }
     
+    STRICT MODE: El 'sense_code' NUNCA se lee del input.
+    Se elimina cualquier columna relacionada con sentido.
+    """
     # Normalizar a minúsculas y strip
     df.columns = df.columns.str.strip().str.lower()
     
-    # Renombrar si existen
-    # Invertir el mapa para buscar claves
-    # Pero mejor iteramos
-    
-    # Si las columnas ya son correctas, no hacer nada
-    # Si son las del archivo raw (origin, destination, etc)
-    
-    # Ajuste específico para el archivo de checkpoint
+    # Renombrar columnas estándar
     if 'origin' in df.columns:
         df.rename(columns={'origin': 'origin_id'}, inplace=True)
     if 'destination' in df.columns:
         df.rename(columns={'destination': 'destination_id'}, inplace=True)
     if 'checkpoint' in df.columns:
         df.rename(columns={'checkpoint': 'checkpoint_id'}, inplace=True)
-    if 'sentido' in df.columns:
-        df.rename(columns={'sentido': 'sense_code'}, inplace=True)
-    if 'sense' in df.columns:
-        df.rename(columns={'sense': 'sense_code'}, inplace=True)
+    
+    # STRICT RULE: Eliminar CUALQUIER columna de sentido del input
+    # El sentido SOLO se deriva geométricamente en compute_mc2_matrix
+    cols_to_drop = []
+    for col in df.columns:
+        if col in ['sentido', 'sense', 'sense_code', 'direccion', 'direction']:
+            cols_to_drop.append(col)
+    
+    if cols_to_drop:
+        df = df.drop(columns=cols_to_drop)
+        print(f"⚠️  STRICT MODE: Columnas de sentido eliminadas del input: {cols_to_drop}")
+        print("    El sentido se derivará geométricamente de la ruta MC2.")
         
     return df
 

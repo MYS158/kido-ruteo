@@ -15,11 +15,8 @@ def classify_congruence(df: pd.DataFrame) -> pd.DataFrame:
     
     conditions = [
         (df['id_potential'] == 0),
-        # Example rules (adjust based on specific business logic if provided, otherwise standard KIDO)
-        # Standard KIDO usually:
-        # E1 close to 1.0 (+- 10-20%) AND E2 close to 1.0 (+- 5-10%) -> 1
-        # E1 acceptable AND E2 acceptable -> 2
-        # Outliers -> 3
+        # If capacity is missing (cap_total is NaN), congruence is Impossible (4)
+        (df['cap_total'].isna()),
         
         # Implementemos una lógica robusta:
         # 1: E1 en [0.9, 1.2] Y E2 >= 0.8 (Alta congruencia)
@@ -32,7 +29,7 @@ def classify_congruence(df: pd.DataFrame) -> pd.DataFrame:
         (df['e1_route_score'] < 2.0)
     ]
     
-    choices = [4, 1, 2, 3]
+    choices = [4, 4, 1, 2, 3]
     
     df['congruence_id'] = np.select(conditions, choices, default=4)
     
@@ -48,6 +45,8 @@ def classify_congruence(df: pd.DataFrame) -> pd.DataFrame:
     # Reason
     df['congruence_reason'] = 'Valid'
     df.loc[df['id_potential'] == 0, 'congruence_reason'] = 'Potential=0'
+    if 'cap_total' in df.columns:
+        df.loc[df['cap_total'].isna(), 'congruence_reason'] = 'No Capacity'
     df.loc[(df['id_potential'] == 1) & (df['congruence_id'] == 4), 'congruence_reason'] = 'Score Outlier'
     
     return df

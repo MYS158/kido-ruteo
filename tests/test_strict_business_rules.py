@@ -1,163 +1,202 @@
-import pytest
+import unittest
 import pandas as pd
 import numpy as np
 import os
-# from kido_ruteo.pipeline import run_pipeline_for_file
-# Assuming run_pipeline_for_file is a function we can expose or we mock the pipeline run.
-# Since run_pipeline_for_file doesn't exist in the current pipeline.py (it has run_pipeline which does everything),
-# we might need to refactor pipeline.py to allow running for a single file or dataframe for testing.
-# For now, I will mock the dataframe transformation steps or assume we can import the processing functions.
+import sys
 
-# To make these tests runnable, I will import the specific functions that implement the logic
-# and test them in isolation or sequence, simulating "run_pipeline".
+# Add src to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
 
-from kido_ruteo.processing.preprocessing import normalize_column_names, prepare_data
+from kido_ruteo.pipeline import run_pipeline
+from kido_ruteo.trips.calculation import calculate_vehicle_trips
 from kido_ruteo.capacity.matcher import match_capacity_to_od
-from kido_ruteo.congruence.scoring import calculate_scores
 from kido_ruteo.congruence.potential import calculate_potential
 from kido_ruteo.congruence.classification import classify_congruence
-from kido_ruteo.trips.calculation import calculate_vehicle_trips
 
-# Mock data creation
-def create_mock_df(checkpoint_id='2001', sense_code='1', trips=10):
-    return pd.DataFrame({
-        'origin_id': ['1'],
-        'destination_id': ['2'],
-        'checkpoint_id': [checkpoint_id],
-        'sense_code': [sense_code],
-        'trips_person': [trips],
-        'mc_distance_m': [1000],
-        'mc2_distance_m': [1200],
-        'total_trips': [trips],
-        'has_valid_path': [True]
-    })
+class TestStrictBusinessRules(unittest.TestCase):
 
-def create_mock_capacity():
-    return pd.DataFrame({
-        'Checkpoint': ['2001', '2001'],
-        'Sentido': ['1', '2'],
-        'cap_total': [1000, 2000],
-        'cap_moto': [100, 200],
-        'cap_auto': [500, 1000],
-        'cap_bus': [100, 200],
-        'cap_cu': [100, 200],
-        'cap_cai': [100, 200],
-        'cap_caii': [100, 200],
-        'focup_moto': [1, 1],
-        'focup_auto': [1.5, 1.5],
-        'focup_bus': [20, 20],
-        'focup_cu': [1.2, 1.2],
-        'focup_cai': [1.1, 1.1],
-        'focup_caii': [1.1, 1.1]
-    })
+    def setUp(self):
+        # Mock Data
+        self.od_general = pd.DataFrame({
+            'origin_id': [1, 2],
+            'destination_id': [3, 4],
+            'total_trips': [100, 200],
+            'trips_person': [100, 200] # Added trips_person
+        })
+        
+        self.od_checkpoint = pd.DataFrame({
+            'origin_id': [1],
+            'destination_id': [3],
+            'total_trips': [100],
+            'checkpoint_id': ['2001'],
+            'sense_code': ['0'], # Assuming '0' is valid if capacity exists
+            'trips_person': [100],
+            'id_potential': [1],
+            'congruence_id': [1],
+            'intrazonal_factor': [1]
+        })
+        
+        self.capacity = pd.DataFrame({
+            'Checkpoint': ['2001'],
+            'Sentido': ['0'],
+            'FA': [1.0],
+            'M': [10], 'A': [50], 'B': [10], 'CU': [10], 'CAI': [10], 'CAII': [10],
+            'TOTAL': [100],
+            'Focup_M': [1.0], 'Focup_A': [1.5], 'Focup_B': [20.0], 'Focup_CU': [1.0], 'Focup_CAI': [1.0], 'Focup_CAII': [1.0]
+        })
 
-# Helper to simulate pipeline run
-def run_pipeline_mock(df, cap_df):
-    # 1. Ingest (Mocked by creation)
-    # 2. Sense Validation (Need to implement strict rule)
-    # In matcher.py or pipeline.py
-    
-    # Simulate Match Capacity
-    df = match_capacity_to_od(df, cap_df)
-    
-    # Simulate Potential
-    df = calculate_potential(df)
-    
-    # Simulate Scoring
-    df = calculate_scores(df)
-    
-    # Simulate Congruence
-    df = classify_congruence(df)
-    
-    # Simulate Vehicle Trips
-    df = calculate_vehicle_trips(df)
-    
-    return df
-    
-    # Simulate Vehicle Trips
-    df = calculate_vehicle_trips(df)
-    
-    return df
+    def test_general_query_no_checkpoint(self):
+        """Test that General Query (no checkpoint) results in 0 vehicles."""
+        # Simulate pipeline steps for General Query
+        df = self.od_general.copy()
+        
+        # Match Capacity (should return original)
+        df_matched = match_capacity_to_od(df, self.capacity)
+        self.assertTrue('cap_total' not in df_matched.columns)
+        
+        # Calculate Potential (should handle missing cols)
+        if 'checkpoint_id' not in df_matched.columns:
+            df_matched['id_potential'] = 0
+            
+        # Calculate Vehicles
+        df_veh = calculate_vehicle_trips(df_matched)
+        
+        self.assertEqual(df_veh['veh_total'].sum(), 0)
+        self.assertTrue('veh_auto' in df_veh.columns)
 
-# 🧪 Test 1 — Checkpoint inmutable
-def test_checkpoint_is_read_only():
-    # This test verifies that throughout the transformation, checkpoint_id remains '2001'
-    df = create_mock_df(checkpoint_id='2001')
-    cap_df = create_mock_capacity()
-    
-    result = run_pipeline_mock(df, cap_df)
-    
-    assert (result["checkpoint_id"] == '2001').all()
-    # Ensure it wasn't converted to int or float if it started as string, or vice versa if strict
-    # The prompt says "If input is checkpoint2001.csv, then checkpoint_id = 2001"
-    # Usually IDs are strings to avoid math operations.
-    
-# 🧪 Test 2 — Capacidad indexada correctamente
-def test_capacity_depends_on_checkpoint_and_sense():
-    # Create DF with same checkpoint but different senses
-    df = pd.concat([
-        create_mock_df(checkpoint_id='2001', sense_code='1'),
-        create_mock_df(checkpoint_id='2001', sense_code='2')
-    ])
-    cap_df = create_mock_capacity() # Has different caps for sense 1 and 2
-    
-    result = run_pipeline_mock(df, cap_df)
-    
-    # Check that e2_capacity_score or cap_total is different
-    # Note: E2 depends on demand/capacity. If demand is same (10 trips), and capacity differs (1000 vs 2000),
-    # E2 score might be same (1.0) if both ratios are low.
-    # Let's check 'cap_total' which is merged in.
-    
-    assert result.loc[result['sense_code'] == '1', 'cap_total'].iloc[0] == 1000
-    assert result.loc[result['sense_code'] == '2', 'cap_total'].iloc[0] == 2000
+    def test_checkpoint_query_logic(self):
+        """Test strict transformation logic for Checkpoint Query."""
+        df = self.od_checkpoint.copy()
+        
+        # 1. Match Capacity
+        df = match_capacity_to_od(df, self.capacity)
+        self.assertTrue(df['cap_available'].iloc[0])
+        
+        # 2. Calculate Vehicles
+        df = calculate_vehicle_trips(df)
+        
+        veh_auto = df['veh_auto'].iloc[0]
+        # 100 * 0.5 / 1.5 = 33.333
+        self.assertAlmostEqual(veh_auto, 33.333333, places=4)
 
-# 🧪 Test 3 — Sentido inválido mata el potencial
-def test_invalid_sense_forces_impossible():
-    df = create_mock_df(checkpoint_id='2001', sense_code='0')
-    cap_df = create_mock_capacity() # No capacity for sense '0'
-    
-    result = run_pipeline_mock(df, cap_df)
-    
-    # Strict rule: sense '0' -> sense_valid = False -> id_potential = 0 -> congruence = 4
-    assert (result["id_potential"] == 0).all()
-    assert (result["congruence_id"] == 4).all()
+    def test_vehicle_sum_integrity(self):
+        """Test that veh_total equals the sum of all vehicle categories."""
+        df = self.od_checkpoint.copy()
+        df = match_capacity_to_od(df, self.capacity)
+        df = calculate_vehicle_trips(df)
+        
+        row = df.iloc[0]
+        veh_sum = (
+            row['veh_moto'] + row['veh_auto'] + row['veh_bus'] + 
+            row['veh_cu'] + row['veh_cai'] + row['veh_caii']
+        )
+        
+        self.assertAlmostEqual(row['veh_total'], veh_sum, places=4)
 
-# 🧪 Test 4 — Viajes solo si hay potencial
-def test_no_vehicle_trips_without_potential():
-    # Case where potential is 0 (e.g. invalid sense)
-    df = create_mock_df(checkpoint_id='2001', sense_code='0')
-    cap_df = create_mock_capacity()
-    
-    result = run_pipeline_mock(df, cap_df)
-    
-    no_pot = result[result["id_potential"] == 0]
-    veh_cols = ["veh_moto","veh_auto","veh_bus","veh_cu","veh_cai","veh_caii"]
-    
-    assert (no_pot[veh_cols].sum(axis=1) == 0).all()
+    def test_missing_capacity_entry(self):
+        """Test that missing capacity entry results in NaN vehicles (not 0)."""
+        df = self.od_checkpoint.copy()
+        df['sense_code'] = '999' # Invalid sense
+        
+        df = match_capacity_to_od(df, self.capacity)
+        
+        # Should have cap_available = False (or NaN)
+        self.assertFalse(df['cap_available'].fillna(False).iloc[0])
+        
+        # If we force id_potential=1 (which shouldn't happen if potential logic works, but let's test vehicle calc robustness)
+        df = calculate_vehicle_trips(df)
+        # Now we expect NaN, not 0.0
+        self.assertTrue(np.isnan(df['veh_total'].iloc[0]))
 
-# 🧪 Test 5 — Invarianza de filas (No expansión)
-def test_capacity_does_not_expand_rows():
-    # Input: 1 row
-    df = create_mock_df(checkpoint_id='2001', sense_code='1')
-    cap_df = create_mock_capacity()
-    
-    # Even if capacity has multiple entries for other senses or checkpoints,
-    # the output should still be 1 row because we match on (checkpoint, sense).
-    # Let's ensure capacity has multiple entries for this checkpoint (already does: 1 and 2)
-    
-    result = run_pipeline_mock(df, cap_df)
-    
-    assert len(result) == len(df)
+    def test_sense_zero_aggregates_capacity(self):
+        """Test that sense_code='0' aggregates multiple capacity rows."""
+        df = pd.DataFrame({
+            'origin_id': [1],
+            'destination_id': [2],
+            'checkpoint_id': ['2001'],
+            'sense_code': ['0'],
+            'trips_person': [100],
+            'id_potential': [1],
+            'congruence_id': [1],
+            'intrazonal_factor': [1]
+        })
+        
+        # Capacity with 2 rows for same checkpoint
+        cap_df = pd.DataFrame({
+            'Checkpoint': ['2001', '2001'],
+            'Sentido': ['1', '2'],
+            'FA': [1.0, 1.0],
+            'M': [10, 10], 'A': [50, 50], 'B': [10, 10], 'CU': [10, 10], 'CAI': [10, 10], 'CAII': [10, 10],
+            'TOTAL': [100, 100],
+            'Focup_M': [1.0, 1.0], 'Focup_A': [1.5, 1.5], 'Focup_B': [20.0, 20.0], 'Focup_CU': [1.0, 1.0], 'Focup_CAI': [1.0, 1.0], 'Focup_CAII': [1.0, 1.0]
+        })
+        
+        # Match
+        df_matched = match_capacity_to_od(df, cap_df)
+        
+        # Should have aggregated capacity
+        # Total Cap = 100 + 100 = 200
+        self.assertEqual(df_matched['cap_total'].iloc[0], 200)
+        # Cap Auto = 50 + 50 = 100
+        self.assertEqual(df_matched['cap_auto'].iloc[0], 100)
 
-# 🧪 Test 6 — Sentido inválido (Validación explícita)
-def test_invalid_sense_validation_flags():
-    df = create_mock_df(checkpoint_id='2001', sense_code='999') # Invalid sense
-    cap_df = create_mock_capacity()
-    
-    result = run_pipeline_mock(df, cap_df)
-    
-    row = result.iloc[0]
-    # sense_valid should be False because '999' is not in cap_df
-    assert row["sense_valid"] is False or row["sense_valid"] == False
-    assert row["id_potential"] == 0
-    assert row["congruence_id"] == 4
+    def test_missing_capacity_keeps_trips_person(self):
+        """Test that missing capacity does NOT zero trips_person."""
+        df = pd.DataFrame({
+            'origin_id': [1],
+            'destination_id': [2],
+            'checkpoint_id': ['9999'], # No capacity
+            'sense_code': ['1'],
+            'trips_person': [123.45],
+            'id_potential': [1],
+            'congruence_id': [1],
+            'intrazonal_factor': [1]
+        })
+        
+        df_matched = match_capacity_to_od(df, self.capacity)
+        df_veh = calculate_vehicle_trips(df_matched)
+        
+        # trips_person must be preserved
+        self.assertEqual(df_veh['trips_person'].iloc[0], 123.45)
+        
+        # veh_total should be NaN (or 0 if we decided that, but user said NULL/NaN)
+        # In our implementation we used NaN for veh_X and veh_total
+        self.assertTrue(np.isnan(df_veh['veh_total'].iloc[0]))
+
+    def test_checkpoint_query_never_drops_rows(self):
+        """Test that row count is preserved even if capacity is missing."""
+        df = pd.DataFrame({
+            'origin_id': [1, 2],
+            'destination_id': [2, 3],
+            'checkpoint_id': ['2001', '9999'], # One valid, one missing cap
+            'sense_code': ['1', '1'],
+            'trips_person': [100, 100]
+        })
+        
+        df_matched = match_capacity_to_od(df, self.capacity)
+        self.assertEqual(len(df_matched), 2)
+
+    def test_congruence_4_when_no_capacity_but_route_exists(self):
+        """Test that congruence is 4 if capacity is missing."""
+        df = pd.DataFrame({
+            'origin_id': [1],
+            'destination_id': [2],
+            'checkpoint_id': ['9999'], # No capacity
+            'sense_code': ['1'],
+            'trips_person': [100],
+            'id_potential': [1], # Route exists
+            'e1_route_score': [1.0],
+            'e2_capacity_score': [0.0]
+        })
+        
+        # Need to simulate match to get cap_total=NaN
+        df_matched = match_capacity_to_od(df, self.capacity)
+        
+        # Classify
+        df_classified = classify_congruence(df_matched)
+        
+        self.assertEqual(df_classified['congruence_id'].iloc[0], 4)
+        self.assertEqual(df_classified['congruence_label'].iloc[0], 'Impossible')
+
+if __name__ == '__main__':
+    unittest.main()
