@@ -11,13 +11,11 @@ from .processing.preprocessing import prepare_data, normalize_column_names
 from .processing.centrality import build_network_graph
 from .processing.centroides import assign_nodes_to_zones, add_centroid_coordinates_to_od
 from .processing.checkpoint_loader import get_checkpoint_node_mapping
-from .routing.graph_loader import load_graph_from_geojson, download_graph_from_bbox, save_graph_to_geojson
+from .routing.graph_loader import load_graph_from_geojson
 from .routing.shortest_path import compute_mc_matrix
 from .routing.constrained_path import compute_mc2_matrix
 from .capacity.loader import load_capacity_data
 from .capacity.matcher import match_capacity_to_od
-from .congruence.potential import calculate_potential
-from .congruence.scoring import calculate_scores
 from .congruence.classification import classify_congruence
 from .trips.calculation import calculate_vehicle_trips
 
@@ -72,24 +70,43 @@ def run_pipeline(
     # STRICT MODE: Sense is handled in normalize_column_names
     # No need for duplicate check here
     df_od = prepare_data(df_od)
+
+    # STRICT MODE: Queries generales => salida determinista con ceros (NaN ≠ 0)
+    if is_general_query:
+        logger.info("Query GENERAL detectada. Generando salida con ceros y terminando.")
+
+        output_cols = [
+            'Origen', 'Destino',
+            'veh_M', 'veh_A', 'veh_B', 'veh_CU', 'veh_CAI', 'veh_CAII',
+            'veh_total',
+        ]
+
+        df_final = pd.DataFrame({
+            'Origen': df_od['origin_id'],
+            'Destino': df_od['destination_id'],
+            'veh_M': 0,
+            'veh_A': 0,
+            'veh_B': 0,
+            'veh_CU': 0,
+            'veh_CAI': 0,
+            'veh_CAII': 0,
+            'veh_total': 0,
+        })
+
+        input_filename = os.path.basename(od_path)
+        output_filename = f"processed_{input_filename}"
+        output_file = os.path.join(output_dir, output_filename)
+        df_final[output_cols].to_csv(output_file, index=False)
+
+        logger.info(f"Pipeline completado (GENERAL) para {input_filename}. Resultados en: {output_file}")
+        return output_file
     
     # --- Paso 2: Grafo y Centroides ---
     logger.info("[Paso 2] Construcción de Grafo y Asignación de Centroides")
     
-    # Verificar si existe el archivo de red, si no, descargar de OSM
+    # STRICT MODE: no existe fallback/descarga de red. Si falta, es error.
     if not os.path.exists(network_path):
-        logger.warning(f"No se encontró archivo de red en {network_path}.")
-        if osm_bbox:
-            logger.info("Intentando descargar de OpenStreetMap...")
-            try:
-                G_osm = download_graph_from_bbox(*osm_bbox)
-                save_graph_to_geojson(G_osm, network_path)
-                logger.info(f"Red descargada y guardada en {network_path}")
-            except Exception as e:
-                logger.error(f"Error descargando de OSM: {e}")
-                raise
-        else:
-            raise FileNotFoundError(f"No se encontró red y no se proveyó BBox para descarga.")
+        raise FileNotFoundError(f"No se encontró archivo de red en {network_path}.")
 
     # Cargar grafo
     G = load_graph_from_geojson(network_path)
@@ -126,77 +143,52 @@ def run_pipeline(
     # --- Paso 3: Routing (MC - Shortest Path) ---
     logger.info("[Paso 3] Cálculo de Ruta Más Corta (MC)")
     df_od = compute_mc_matrix(df_od, G)
-    
-    if is_general_query:
-        logger.info("Query GENERAL detectada. Saltando cálculo de MC2, Capacidad y Congruencia.")
-        # Inicializar columnas requeridas con NaN (Strict Rule 5)
-        cols_veh = ['veh_auto', 'veh_bus', 'veh_cu', 'veh_cai', 'veh_caii', 'veh_total']
-        for col in cols_veh:
-            df_od[col] = float('nan')
-            
-        # Congruencia Impossible para General
-        df_od['congruence_id'] = 4
-        df_od['congruence_label'] = 'Impossible'
-        df_od['id_potential'] = 0
-        
-    else:
-        # --- Paso 4: Ruteo Restringido (MC2) ---
-        logger.info("[Paso 4] Cálculo de Ruta Restringida (MC2) por Checkpoint y Derivación de Sentido")
-        
-        # compute_mc2_matrix now derives sense_code
-        df_od = compute_mc2_matrix(
-            df_od, 
-            G, 
-            checkpoint_col='checkpoint_node_id',
-            origin_node_col='origin_node_id',
-            dest_node_col='destination_node_id'
-        )
-        
-        # Validar rutas
-        df_od['has_valid_path'] = (
-            (df_od['mc_distance_m'] > 0) & 
-            (df_od['mc2_distance_m'] > 0) & 
-            df_od['mc2_distance_m'].notna()
-        )
-        
-        # --- Paso 5: Capacidad ---
-        logger.info("[Paso 5] Integración de Capacidad")
-        df_cap = load_capacity_data(capacity_path)
-        df_od = match_capacity_to_od(df_od, df_cap)
-        
-        # --- Paso 6: Congruencia y Potencial ---
-        logger.info("[Paso 6] Cálculo de Congruencia y Potencial")
-        df_od = calculate_potential(df_od)
-        df_od = calculate_scores(df_od)
-        df_od = classify_congruence(df_od)
-        
-        # --- Paso 7: Cálculo de Viajes ---
-        logger.info("[Paso 7] Cálculo de Viajes Vehiculares")
-        df_od = calculate_vehicle_trips(df_od)
+
+    # --- Paso 4: Ruteo Restringido (MC2) ---
+    logger.info("[Paso 4] Cálculo de Ruta Restringida (MC2) por Checkpoint y Derivación de Sentido")
+
+    # compute_mc2_matrix deriva sense_code
+    df_od = compute_mc2_matrix(
+        df_od,
+        G,
+        checkpoint_col='checkpoint_node_id',
+        origin_node_col='origin_node_id',
+        dest_node_col='destination_node_id'
+    )
+
+    # Validar rutas
+    df_od['has_valid_path'] = (
+        (df_od['mc_distance_m'] > 0) &
+        (df_od['mc2_distance_m'] > 0) &
+        df_od['mc2_distance_m'].notna()
+    )
+
+    # --- Paso 5: Capacidad ---
+    logger.info("[Paso 5] Integración de Capacidad")
+    df_cap = load_capacity_data(capacity_path)
+    df_od = match_capacity_to_od(df_od, df_cap)
+
+    # --- Paso 6: Congruencia (bloqueante) ---
+    logger.info("[Paso 6] Cálculo de Congruencia (STRICT)")
+    df_od = classify_congruence(df_od)
+
+    # --- Paso 7: Cálculo de Viajes (STRICT guard) ---
+    logger.info("[Paso 7] Cálculo de Viajes Vehiculares")
+    df_od = calculate_vehicle_trips(df_od)
     
     # --- Paso 8: Guardar Resultados ---
     logger.info("[Paso 8] Guardando Resultados")
     
-    # STRICT RULE 6: Salida FINAL limpia
-    # SOLO estas columnas. Sin auditoría, sin geometría, sin flags.
-    # Columnas de vehículos renombradas según especificación:
-    # veh_auto → veh_AU, veh_cu → veh_CU, veh_cai → veh_CAI, veh_caii → veh_CAII
-    
-    # Renombrar columnas de vehículos antes de extraer
-    rename_veh = {
+    # STRICT MODE: Salida FINAL limpia (solo columnas contractuales)
+    df_od = df_od.rename(columns={
         'origin_id': 'Origen',
         'destination_id': 'Destino',
-        'veh_auto': 'veh_AU',
-        'veh_cu': 'veh_CU',
-        'veh_cai': 'veh_CAI',
-        'veh_caii': 'veh_CAII'
-    }
-    
-    df_od = df_od.rename(columns=rename_veh)
-    
+    })
+
     output_cols = [
-        'Origen', 'Destino', 
-        'veh_AU', 'veh_CU', 'veh_CAI', 'veh_CAII', 'veh_total'
+        'Origen', 'Destino',
+        'veh_M', 'veh_A', 'veh_B', 'veh_CU', 'veh_CAI', 'veh_CAII',
+        'veh_total',
     ]
     
     # Asegurar que existan las columnas (rellenar con NaN si faltan, NUNCA 0)

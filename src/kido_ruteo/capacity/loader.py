@@ -6,10 +6,11 @@ def load_capacity_data(file_path: str) -> pd.DataFrame:
     """
     Carga y AGREGA los datos de capacidad por Checkpoint y Sentido.
     
-    Reglas:
+    STRICT MODE:
     - summary_capacity.csv contiene datos a nivel ESTACIÓN.
-    - Se debe agregar (SUM) la capacidad de todas las estaciones para un mismo (Checkpoint, Sentido).
-    - Los factores de ocupación (Focup) se promedian ponderados por la capacidad vehicular correspondiente.
+    - Se agrega por (Checkpoint, Sentido).
+    - NO se imputan valores faltantes con 0 o 1.0 (no hay "rescates").
+    - Focup se calcula como promedio ponderado por la capacidad de su categoría.
     """
     if not os.path.exists(file_path):
         raise FileNotFoundError(f"Capacity file not found: {file_path}")
@@ -33,59 +34,46 @@ def load_capacity_data(file_path: str) -> pd.DataFrame:
     df['Checkpoint'] = df['Checkpoint'].astype(str)
     df['Sentido'] = df['Sentido'].astype(str)
     
-    # Columnas numéricas
+    # Columnas numéricas (no imputar)
     num_cols = ['M', 'A', 'B', 'CU', 'CAI', 'CAII', 'TOTAL']
     for col in num_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
-        
+        df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    df['FA'] = pd.to_numeric(df['FA'], errors='coerce')
+
     focup_cols = ['Focup_M', 'Focup_A', 'Focup_B', 'Focup_CU', 'Focup_CAI', 'Focup_CAII']
     for col in focup_cols:
-        df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0)
+        df[col] = pd.to_numeric(df[col], errors='coerce')
 
     # --- AGREGACIÓN ---
-    # Definir funciones de agregación
-    # Capacidad: Suma
-    agg_dict = {col: 'sum' for col in num_cols}
-    
-    # FA: Promedio (asumimos que es similar para el mismo checkpoint/sentido)
-    # O mejor, promedio ponderado por TOTAL?
-    # El prompt dice "FA proviene exclusivamente de summary_capacity.csv".
-    # Si hay múltiples estaciones, FA debería ser representativo. Usaremos promedio simple por seguridad.
-    agg_dict['FA'] = 'mean'
-    
-    # Para Focup, necesitamos calcular ponderados.
-    # Como groupby.agg no soporta ponderados directos fácilmente, lo hacemos manual o en dos pasos.
-    # Estrategia: Calcular (Focup * Cap) antes de agrupar, sumar eso, y luego dividir por suma de Cap.
-    
+    # Capacidad: suma (min_count=1 para no convertir "todo NaN" en 0)
+    group = df.groupby(['Checkpoint', 'Sentido'], as_index=False)
+
+    df_caps = group[num_cols].sum(min_count=1)
+    df_fa = group[['FA']].mean()
+
+    # Ponderación de Focup: sum(Focup_cat * Cap_cat) / sum(Cap_cat)
+    df = df.copy()
     df['w_Focup_M'] = df['Focup_M'] * df['M']
     df['w_Focup_A'] = df['Focup_A'] * df['A']
     df['w_Focup_B'] = df['Focup_B'] * df['B']
     df['w_Focup_CU'] = df['Focup_CU'] * df['CU']
     df['w_Focup_CAI'] = df['Focup_CAI'] * df['CAI']
     df['w_Focup_CAII'] = df['Focup_CAII'] * df['CAII']
-    
+
     w_cols = ['w_Focup_M', 'w_Focup_A', 'w_Focup_B', 'w_Focup_CU', 'w_Focup_CAI', 'w_Focup_CAII']
-    for col in w_cols:
-        agg_dict[col] = 'sum'
-        
-    # Agrupar
-    df_agg = df.groupby(['Checkpoint', 'Sentido'], as_index=False).agg(agg_dict)
-    
-    # Recalcular Focup ponderados
-    # Evitar división por cero
-    df_agg['Focup_M'] = df_agg['w_Focup_M'] / df_agg['M'].replace(0, np.nan)
-    df_agg['Focup_A'] = df_agg['w_Focup_A'] / df_agg['A'].replace(0, np.nan)
-    df_agg['Focup_B'] = df_agg['w_Focup_B'] / df_agg['B'].replace(0, np.nan)
-    df_agg['Focup_CU'] = df_agg['w_Focup_CU'] / df_agg['CU'].replace(0, np.nan)
-    df_agg['Focup_CAI'] = df_agg['w_Focup_CAI'] / df_agg['CAI'].replace(0, np.nan)
-    df_agg['Focup_CAII'] = df_agg['w_Focup_CAII'] / df_agg['CAII'].replace(0, np.nan)
-    
-    # Rellenar NaNs en Focup (si capacidad era 0) con promedios globales o 1.0
-    # Usaremos 1.0 como fallback seguro
-    for col in focup_cols:
-        df_agg[col] = df_agg[col].fillna(1.0)
-        
-    # Limpiar columnas auxiliares
-    df_agg.drop(columns=w_cols, inplace=True)
-    
+    df_w = df.groupby(['Checkpoint', 'Sentido'], as_index=False)[w_cols].sum(min_count=1)
+
+    df_agg = df_caps.merge(df_fa, on=['Checkpoint', 'Sentido'], how='left')
+    df_agg = df_agg.merge(df_w, on=['Checkpoint', 'Sentido'], how='left')
+
+    # Recalcular Focup ponderados (si capacidad=0 o NaN => Focup queda NaN)
+    df_agg['Focup_M'] = df_agg['w_Focup_M'] / df_agg['M'].where(df_agg['M'] > 0)
+    df_agg['Focup_A'] = df_agg['w_Focup_A'] / df_agg['A'].where(df_agg['A'] > 0)
+    df_agg['Focup_B'] = df_agg['w_Focup_B'] / df_agg['B'].where(df_agg['B'] > 0)
+    df_agg['Focup_CU'] = df_agg['w_Focup_CU'] / df_agg['CU'].where(df_agg['CU'] > 0)
+    df_agg['Focup_CAI'] = df_agg['w_Focup_CAI'] / df_agg['CAI'].where(df_agg['CAI'] > 0)
+    df_agg['Focup_CAII'] = df_agg['w_Focup_CAII'] / df_agg['CAII'].where(df_agg['CAII'] > 0)
+
+    df_agg = df_agg.drop(columns=w_cols)
     return df_agg

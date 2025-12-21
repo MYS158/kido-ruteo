@@ -3,6 +3,7 @@ import pandas as pd
 import numpy as np
 import os
 import sys
+import tempfile
 
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
@@ -10,7 +11,6 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 's
 from kido_ruteo.pipeline import run_pipeline
 from kido_ruteo.trips.calculation import calculate_vehicle_trips
 from kido_ruteo.capacity.matcher import match_capacity_to_od
-from kido_ruteo.congruence.potential import calculate_potential
 from kido_ruteo.congruence.classification import classify_congruence
 
 class TestStrictBusinessRules(unittest.TestCase):
@@ -29,40 +29,40 @@ class TestStrictBusinessRules(unittest.TestCase):
             'destination_id': [3],
             'total_trips': [100],
             'checkpoint_id': ['2001'],
-            'sense_code': ['0'], # Assuming '0' is valid if capacity exists
+            'sense_code': ['1-3'],
             'trips_person': [100],
-            'id_potential': [1],
-            'congruence_id': [1],
             'intrazonal_factor': [1]
         })
         
         self.capacity = pd.DataFrame({
             'Checkpoint': ['2001'],
-            'Sentido': ['0'],
+            'Sentido': ['1-3'],
             'FA': [1.0],
-            'M': [10], 'A': [50], 'B': [10], 'CU': [10], 'CAI': [10], 'CAII': [10],
-            'TOTAL': [100],
-            'Focup_M': [1.0], 'Focup_A': [1.5], 'Focup_B': [20.0], 'Focup_CU': [1.0], 'Focup_CAI': [1.0], 'Focup_CAII': [1.0]
+            'M': [0], 'A': [50], 'B': [0], 'CU': [50], 'CAI': [0], 'CAII': [0],
+            'Focup_M': [np.nan], 'Focup_A': [2.0], 'Focup_B': [np.nan], 'Focup_CU': [2.0], 'Focup_CAI': [np.nan], 'Focup_CAII': [np.nan]
         })
 
     def test_general_query_no_checkpoint(self):
         """Test that General Query (no checkpoint) results in 0 vehicles."""
-        # Simulate pipeline steps for General Query
-        df = self.od_general.copy()
-        
-        # Match Capacity (should return original)
-        df_matched = match_capacity_to_od(df, self.capacity)
-        self.assertTrue('cap_total' not in df_matched.columns)
-        
-        # Calculate Potential (should handle missing cols)
-        if 'checkpoint_id' not in df_matched.columns:
-            df_matched['id_potential'] = 0
-            
-        # Calculate Vehicles
-        df_veh = calculate_vehicle_trips(df_matched)
-        
-        self.assertEqual(df_veh['veh_total'].sum(), 0)
-        self.assertTrue('veh_auto' in df_veh.columns)
+        with tempfile.TemporaryDirectory() as tmpdir:
+            od_path = os.path.join(tmpdir, 'od_general.csv')
+            out_dir = os.path.join(tmpdir, 'out')
+            self.od_general.to_csv(od_path, index=False)
+
+            output_file = run_pipeline(
+                od_path=od_path,
+                zonification_path='__unused__',
+                network_path='__unused__',
+                capacity_path='__unused__',
+                output_dir=out_dir,
+            )
+
+            df_out = pd.read_csv(output_file)
+            self.assertListEqual(
+                list(df_out.columns),
+                ['Origen', 'Destino', 'veh_M', 'veh_A', 'veh_B', 'veh_CU', 'veh_CAI', 'veh_CAII', 'veh_total']
+            )
+            self.assertTrue((df_out[['veh_M', 'veh_A', 'veh_B', 'veh_CU', 'veh_CAI', 'veh_CAII', 'veh_total']] == 0).all().all())
 
     def test_checkpoint_query_logic(self):
         """Test strict transformation logic for Checkpoint Query."""
@@ -70,25 +70,36 @@ class TestStrictBusinessRules(unittest.TestCase):
         
         # 1. Match Capacity
         df = match_capacity_to_od(df, self.capacity)
-        self.assertTrue(df['cap_available'].iloc[0])
+
+        self.assertFalse(df['cap_total'].isna().iloc[0])
+
+        # 2. Congruence (needs route validity)
+        df['has_valid_path'] = True
+        df = classify_congruence(df)
+        self.assertEqual(df['congruence_id'].iloc[0], 1)
         
-        # 2. Calculate Vehicles
+        # 3. Calculate Vehicles
         df = calculate_vehicle_trips(df)
-        
-        veh_auto = df['veh_auto'].iloc[0]
-        # 100 * 0.5 / 1.5 = 33.333
-        self.assertAlmostEqual(veh_auto, 33.333333, places=4)
+
+        # cap_A=50, cap_CU=50, cap_total=100, FA=1.0, focup_A=2.0, focup_CU=2.0
+        # veh_A = 100*1.0*(0.5)/2 = 25
+        # veh_CU = 100*1.0*(0.5)/2 = 25
+        self.assertAlmostEqual(df['veh_A'].iloc[0], 25.0, places=6)
+        self.assertAlmostEqual(df['veh_CU'].iloc[0], 25.0, places=6)
+        self.assertAlmostEqual(df['veh_total'].iloc[0], 50.0, places=6)
 
     def test_vehicle_sum_integrity(self):
         """Test that veh_total equals the sum of all vehicle categories."""
         df = self.od_checkpoint.copy()
         df = match_capacity_to_od(df, self.capacity)
+        df['has_valid_path'] = True
+        df = classify_congruence(df)
         df = calculate_vehicle_trips(df)
         
         row = df.iloc[0]
         veh_sum = (
-            row['veh_moto'] + row['veh_auto'] + row['veh_bus'] + 
-            row['veh_cu'] + row['veh_cai'] + row['veh_caii']
+            row['veh_M'] + row['veh_A'] + row['veh_B'] +
+            row['veh_CU'] + row['veh_CAI'] + row['veh_CAII']
         )
         
         self.assertAlmostEqual(row['veh_total'], veh_sum, places=4)
@@ -100,24 +111,23 @@ class TestStrictBusinessRules(unittest.TestCase):
         
         df = match_capacity_to_od(df, self.capacity)
         
-        # Should have cap_available = False (or NaN)
-        self.assertFalse(df['cap_available'].fillna(False).iloc[0])
+        self.assertTrue(np.isnan(df['cap_total'].iloc[0]))
+        df['has_valid_path'] = True
+        df = classify_congruence(df)
+        self.assertEqual(df['congruence_id'].iloc[0], 4)
         
-        # If we force id_potential=1 (which shouldn't happen if potential logic works, but let's test vehicle calc robustness)
         df = calculate_vehicle_trips(df)
         # Now we expect NaN, not 0.0
         self.assertTrue(np.isnan(df['veh_total'].iloc[0]))
 
     def test_sense_zero_aggregates_capacity(self):
-        """Test that sense_code='0' aggregates multiple capacity rows."""
+        """STRICT: sense_code='0' is invalid and must NOT aggregate capacity."""
         df = pd.DataFrame({
             'origin_id': [1],
             'destination_id': [2],
             'checkpoint_id': ['2001'],
             'sense_code': ['0'],
             'trips_person': [100],
-            'id_potential': [1],
-            'congruence_id': [1],
             'intrazonal_factor': [1]
         })
         
@@ -133,12 +143,9 @@ class TestStrictBusinessRules(unittest.TestCase):
         
         # Match
         df_matched = match_capacity_to_od(df, cap_df)
-        
-        # Should have aggregated capacity
-        # Total Cap = 100 + 100 = 200
-        self.assertEqual(df_matched['cap_total'].iloc[0], 200)
-        # Cap Auto = 50 + 50 = 100
-        self.assertEqual(df_matched['cap_auto'].iloc[0], 100)
+
+        # No match should happen (cap_total remains NaN)
+        self.assertTrue(np.isnan(df_matched['cap_total'].iloc[0]))
 
     def test_missing_capacity_keeps_trips_person(self):
         """Test that missing capacity does NOT zero trips_person."""
@@ -184,9 +191,7 @@ class TestStrictBusinessRules(unittest.TestCase):
             'checkpoint_id': ['9999'], # No capacity
             'sense_code': ['1'],
             'trips_person': [100],
-            'id_potential': [1], # Route exists
-            'e1_route_score': [1.0],
-            'e2_capacity_score': [0.0]
+            'has_valid_path': [True],
         })
         
         # Need to simulate match to get cap_total=NaN

@@ -1,12 +1,50 @@
-"""
-Módulo para cálculo de Constrained Shortest Path (MC2).
+"""kido_ruteo.routing.constrained_path
+
+STRICT MODE (docs/flow.md):
+- Calcula MC2 (camino mínimo obligado por checkpoint).
+- Deriva `sense_code` EXCLUSIVAMENTE desde la geometría de MC2 en el checkpoint.
+- Valida el `sense_code` contra el catálogo `sense_cardinality.csv`.
+
+No existe lectura de sentido desde OD, ni fallbacks, ni promedios.
 """
 
 import networkx as nx
 import pandas as pd
 import math
+import numpy as np
+from pathlib import Path
 from typing import List, Tuple, Optional
 from tqdm import tqdm
+
+
+def _default_sense_catalog_path() -> Path:
+    # repo_root/.../src/kido_ruteo/routing/constrained_path.py -> parents[3] == repo root
+    return Path(__file__).resolve().parents[3] / 'data' / 'catalogs' / 'sense_cardinality.csv'
+
+
+def _load_valid_sense_codes(catalog_path: Optional[str] = None) -> set[str]:
+    """Carga el catálogo de sentidos válidos.
+
+    El flujo oficial exige lookup explícito en sense_cardinality.csv.
+    Si el archivo no existe o es inválido, se debe fallar (no hay fallback).
+    """
+    path = Path(catalog_path) if catalog_path else _default_sense_catalog_path()
+    if not path.exists():
+        raise FileNotFoundError(f"sense_cardinality.csv no encontrado en: {path}")
+
+    df = pd.read_csv(path)
+    if 'sentido' not in df.columns:
+        raise ValueError("sense_cardinality.csv debe contener columna 'sentido'")
+
+    valid = (
+        df['sentido']
+        .astype(str)
+        .str.strip()
+        .replace({'nan': np.nan, 'None': np.nan})
+        .dropna()
+        .tolist()
+    )
+    return set(valid)
 
 def calculate_bearing(G, u, v):
     """Calculates bearing from node u to node v in degrees (0=N, 90=E)."""
@@ -49,18 +87,10 @@ def get_cardinality(bearing, is_origin=False):
 
 def derive_sense_from_path(G: nx.Graph, path: List[str], checkpoint_node: str) -> Optional[str]:
     """
-    STRICT MODE: Deriva el código de sentido desde la GEOMETRÍA.
-    
-    El sentido SIEMPRE se calcula geométricamente a partir de la ruta:
-    Origen → Checkpoint → Destino
-    
-    Proceso:
-    1. Calcular bearings (dirección) en el checkpoint
-    2. Mapear bearings a cardinalidad: 1=Norte, 2=Este, 3=Sur, 4=Oeste
-    3. Formar código 'origen-destino' (ej: '1-3')
-    4. El código resultante es el sense_code (sin lookup en catálogo)
-    
-    NUNCA se lee del input. NUNCA se asume. SOLO se deriva.
+    STRICT MODE: Deriva el `sense_code` desde la geometría de MC2.
+
+    NOTA: El lookup contra `sense_cardinality.csv` ocurre fuera de esta función.
+    Esta función solo produce el candidato geométrico (ej: '4-2').
     """
     if not path or len(path) < 3:
         return None
@@ -90,9 +120,6 @@ def derive_sense_from_path(G: nx.Graph, path: List[str], checkpoint_node: str) -
     # Derived from Outgoing Bearing
     dest_card = get_cardinality(bearing_out, is_origin=False)
     
-    # El código 'origen-destino' ES el sense_code
-    # No se requiere lookup en sense_cardinality.csv
-    # El archivo de capacidad usa el mismo formato (ej: '1-3', '4-2')
     if origin_card and dest_card:
         return f"{origin_card}-{dest_card}"
     return None
@@ -129,19 +156,21 @@ def compute_mc2_matrix(
     G: nx.Graph,
     checkpoint_col: str = 'checkpoint_id',
     origin_node_col: str = 'origin_node_id',
-    dest_node_col: str = 'destination_node_id'
+    dest_node_col: str = 'destination_node_id',
+    sense_catalog_path: Optional[str] = None
 ) -> pd.DataFrame:
     """
-    STRICT MODE: Calcula MC2 (ruta mínima obligada por checkpoint) y DERIVA EL SENTIDO.
-    
-    REGLA 2: El sentido SOLO se deriva de MC2.
-    - Nunca se lee del input
-    - Nunca se infiere de otra fuente
-    - Si no hay ruta MC2 válida → sense_code = None
-    
-    Esta es la ÚNICA función que crea sense_code.
+    STRICT MODE (docs/flow.md):
+    - Calcula MC2 (ruta mínima obligada por checkpoint)
+    - Deriva sentido geométricamente en el checkpoint
+    - Mapea bearings a cardinalidad
+    - Hace lookup en `sense_cardinality.csv`
+
+    Si no hay ruta MC2 válida o no se puede derivar/validar el sentido → `sense_code = NaN`.
     """
     print("  Calculando matriz MC2 (Constrained Path) y Sentido...")
+
+    valid_sense_codes = _load_valid_sense_codes(sense_catalog_path)
     
     dist_mc2 = []
     derived_senses = []
@@ -153,7 +182,7 @@ def compute_mc2_matrix(
         
         if pd.isna(origin) or pd.isna(dest) or pd.isna(checkpoint):
             dist_mc2.append(None)
-            derived_senses.append(None)
+            derived_senses.append(np.nan)
             continue
             
         checkpoint = str(checkpoint)
@@ -161,14 +190,19 @@ def compute_mc2_matrix(
         path, dist = compute_constrained_shortest_path(G, origin, dest, checkpoint)
         
         dist_mc2.append(dist)
-        
-        # Derive Sense
-        sense = None
+
+        # Derivar + validar sentido (lookup obligatorio)
+        sense_candidate = None
         if path:
-            sense = derive_sense_from_path(G, path, checkpoint)
-        derived_senses.append(sense)
+            sense_candidate = derive_sense_from_path(G, path, checkpoint)
+
+        if sense_candidate and (sense_candidate in valid_sense_codes) and (sense_candidate != '0'):
+            derived_senses.append(sense_candidate)
+        else:
+            derived_senses.append(np.nan)
         
     df_od['mc2_distance_m'] = dist_mc2
-    df_od['sense_code'] = derived_senses # Overwrite or create sense_code
+    # Overwrite/create sense_code (STRICT: only here, derived from MC2)
+    df_od['sense_code'] = derived_senses
         
     return df_od

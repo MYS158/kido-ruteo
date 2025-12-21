@@ -8,39 +8,52 @@ def match_capacity_to_od(df_od: pd.DataFrame, df_capacity: pd.DataFrame) -> pd.D
     STRICT MODE:
     - Match EXACTO de (checkpoint_id, sense_code) con (Checkpoint, Sentido)
     - NO fallback a Sentido '0'
-    - NO agregación de capacidades
-    - Si no hay match exacto → todas las capacidades = NaN
+    - NO agregación en este paso (la agregación, si existe, ocurre en loader)
+    - Si no hay match exacto → todas las capacidades/factores quedan NaN
     
     Args:
         df_od: DataFrame con 'checkpoint_id' y 'sense_code' (derivado geométricamente)
         df_capacity: DataFrame con 'Checkpoint', 'Sentido', y capacidades por categoría
         
     Returns:
-        DataFrame con columnas cap_au, cap_cu, cap_cai, cap_caii, cap_total
-        Si no hay match: todas las capacidades = NaN
+        DataFrame con columnas:
+        - cap_M, cap_A, cap_B, cap_CU, cap_CAI, cap_CAII, cap_total
+        - fa
+        - focup_M, focup_A, focup_B, focup_CU, focup_CAI, focup_CAII
+        Si no hay match: todo queda NaN
     """
     # Si no hay checkpoint_id, no podemos cruzar capacidad
     if 'checkpoint_id' not in df_od.columns:
-        # Agregar columnas vacías
-        df_od['cap_au'] = np.nan
-        df_od['cap_cu'] = np.nan
-        df_od['cap_cai'] = np.nan
-        df_od['cap_caii'] = np.nan
-        df_od['cap_total'] = np.nan
+        df_od = df_od.copy()
+        for col in [
+            'cap_M', 'cap_A', 'cap_B', 'cap_CU', 'cap_CAI', 'cap_CAII', 'cap_total',
+            'fa',
+            'focup_M', 'focup_A', 'focup_B', 'focup_CU', 'focup_CAI', 'focup_CAII',
+        ]:
+            df_od[col] = np.nan
         return df_od
 
-    # Asegurar tipos string para las llaves de cruce
-    df_od['checkpoint_id'] = df_od['checkpoint_id'].astype(str)
-    if 'sense_code' not in df_od.columns:
-        df_od['sense_code'] = None
-    
+    df_od = df_od.copy()
     df_capacity = df_capacity.copy()
-    df_capacity['Checkpoint'] = df_capacity['Checkpoint'].astype(str)
-    df_capacity['Sentido'] = df_capacity['Sentido'].astype(str)
+
+    # Llaves de cruce: (checkpoint_id, sense_code) con (Checkpoint, Sentido)
+    # STRICT MODE: NO convertir NaN a strings; NaN debe permanecer NaN
+    df_od['checkpoint_id'] = df_od['checkpoint_id'].astype('string')
+    if 'sense_code' not in df_od.columns:
+        df_od['sense_code'] = pd.Series([pd.NA] * len(df_od), dtype='string')
+    else:
+        df_od['sense_code'] = df_od['sense_code'].astype('string')
+
+    df_capacity['Checkpoint'] = df_capacity['Checkpoint'].astype('string')
+    df_capacity['Sentido'] = df_capacity['Sentido'].astype('string')
     
-    # Seleccionar solo columnas necesarias de capacity
-    # summary_capacity.csv tiene: A, CU, CAI, CAII (sin AU en el nombre)
-    capacity_cols = ['Checkpoint', 'Sentido', 'A', 'CU', 'CAI', 'CAII']
+    # Seleccionar solo columnas necesarias de capacity (ya agregada)
+    capacity_cols = [
+        'Checkpoint', 'Sentido',
+        'FA',
+        'M', 'A', 'B', 'CU', 'CAI', 'CAII',
+        'Focup_M', 'Focup_A', 'Focup_B', 'Focup_CU', 'Focup_CAI', 'Focup_CAII',
+    ]
     df_capacity_slim = df_capacity[capacity_cols].copy()
     
     # MERGE EXACTO: (checkpoint_id, sense_code) con (Checkpoint, Sentido)
@@ -54,34 +67,29 @@ def match_capacity_to_od(df_od: pd.DataFrame, df_capacity: pd.DataFrame) -> pd.D
         validate='many_to_one'
     )
     
-    # Renombrar columnas de capacidad según especificación
-    # A → cap_au (Auto/Automóvil)
+    # Renombrar columnas de capacidad/factores a un esquema interno estable
     rename_map = {
-        'A': 'cap_au',
-        'CU': 'cap_cu',
-        'CAI': 'cap_cai',
-        'CAII': 'cap_caii'
+        'FA': 'fa',
+        'M': 'cap_M',
+        'A': 'cap_A',
+        'B': 'cap_B',
+        'CU': 'cap_CU',
+        'CAI': 'cap_CAI',
+        'CAII': 'cap_CAII',
+        'Focup_M': 'focup_M',
+        'Focup_A': 'focup_A',
+        'Focup_B': 'focup_B',
+        'Focup_CU': 'focup_CU',
+        'Focup_CAI': 'focup_CAI',
+        'Focup_CAII': 'focup_CAII',
     }
     
     merged = merged.rename(columns=rename_map)
     
-    # Calcular cap_total como suma de capacidades por categoría
-    # Si todas son NaN (no match), cap_total será 0 → convertir a NaN
-    merged['cap_total'] = (
-        merged['cap_au'].fillna(0) +
-        merged['cap_cu'].fillna(0) +
-        merged['cap_cai'].fillna(0) +
-        merged['cap_caii'].fillna(0)
-    )
-    
-    # Si NO hubo match (todas las capacidades son NaN), cap_total debe ser NaN
-    all_cap_nan = (
-        merged['cap_au'].isna() & 
-        merged['cap_cu'].isna() & 
-        merged['cap_cai'].isna() & 
-        merged['cap_caii'].isna()
-    )
-    merged.loc[all_cap_nan, 'cap_total'] = np.nan
+    # Calcular cap_total SOLO si todas las categorías están presentes.
+    # STRICT MODE: si falta cualquier capacidad -> cap_total = NaN (no sumas parciales).
+    cap_cols = ['cap_M', 'cap_A', 'cap_B', 'cap_CU', 'cap_CAI', 'cap_CAII']
+    merged['cap_total'] = merged[cap_cols].sum(axis=1, min_count=len(cap_cols))
     
     # Eliminar columnas auxiliares del merge
     if 'Checkpoint' in merged.columns:

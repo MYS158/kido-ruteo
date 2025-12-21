@@ -6,8 +6,8 @@ Valida:
 2. Sentido solo se obtiene por geometría
 3. No existe fallback a sentido 0
 4. Sin match exacto de capacidad → veh_* = NaN
-5. Output contiene EXACTAMENTE 7 columnas
-6. veh_total es NaN si todas las categorías son NaN
+5. Output contiene EXACTAMENTE 9 columnas (6 categorías)
+6. veh_total es NaN si cualquier categoría queda NaN
 """
 
 import unittest
@@ -31,14 +31,23 @@ class TestStrictModeV2(unittest.TestCase):
     
     def setUp(self):
         """Preparar datos de prueba"""
-        # Capacity data con formato correcto
+        # Capacity data con formato correcto (6 categorías + FA + Focup)
         self.capacity = pd.DataFrame({
             'Checkpoint': ['2001', '2001', '2002'],
             'Sentido': ['1-3', '3-1', '1-3'],
-            'A': [1500, 1400, 1200],      # Autos
-            'CU': [400, 350, 300],         # Camioneta Utilitaria
-            'CAI': [200, 180, 150],        # Camión Articulado I
-            'CAII': [80, 70, 50]           # Camión Articulado II
+            'FA': [1.0, 1.0, 1.0],
+            'M': [0, 0, 0],
+            'A': [1500, 1400, 1200],
+            'B': [0, 0, 0],
+            'CU': [500, 400, 300],
+            'CAI': [0, 0, 0],
+            'CAII': [0, 0, 0],
+            'Focup_M': [np.nan, np.nan, np.nan],
+            'Focup_A': [2.0, 2.0, 2.0],
+            'Focup_B': [np.nan, np.nan, np.nan],
+            'Focup_CU': [2.0, 2.0, 2.0],
+            'Focup_CAI': [np.nan, np.nan, np.nan],
+            'Focup_CAII': [np.nan, np.nan, np.nan],
         })
     
     def test_rule1_input_cannot_define_sense(self):
@@ -123,25 +132,30 @@ class TestStrictModeV2(unittest.TestCase):
         self.assertTrue(pd.isna(df_matched['cap_total'].iloc[0]))
         
         # Calcular viajes vehiculares
+        df_matched['congruence_id'] = 1
         df_veh = calculate_vehicle_trips(df_matched)
         
         # TODOS los veh_* deben ser NaN
-        self.assertTrue(pd.isna(df_veh['veh_auto'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_cu'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_cai'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_caii'].iloc[0]))
+        self.assertTrue(pd.isna(df_veh['veh_M'].iloc[0]))
+        self.assertTrue(pd.isna(df_veh['veh_A'].iloc[0]))
+        self.assertTrue(pd.isna(df_veh['veh_B'].iloc[0]))
+        self.assertTrue(pd.isna(df_veh['veh_CU'].iloc[0]))
+        self.assertTrue(pd.isna(df_veh['veh_CAI'].iloc[0]))
+        self.assertTrue(pd.isna(df_veh['veh_CAII'].iloc[0]))
         self.assertTrue(pd.isna(df_veh['veh_total'].iloc[0]))
     
-    def test_rule5_output_exactly_7_columns(self):
+    def test_rule5_output_exactly_9_columns(self):
         """
-        REGLA 5: El output contiene EXACTAMENTE 7 columnas.
-        No veh_bus, no veh_moto, no columnas intermedias.
+        REGLA 5: El output contiene EXACTAMENTE 9 columnas.
+        No columnas intermedias.
         """
         # Columnas esperadas en la salida final
         expected_cols = [
             'Origen',
             'Destino',
-            'veh_AU',
+            'veh_M',
+            'veh_A',
+            'veh_B',
             'veh_CU',
             'veh_CAI',
             'veh_CAII',
@@ -152,46 +166,58 @@ class TestStrictModeV2(unittest.TestCase):
         df_output = pd.DataFrame({
             'Origen': [1, 2],
             'Destino': [2, 3],
-            'veh_AU': [100.0, 150.0],
+            'veh_M': [0.0, 0.0],
+            'veh_A': [100.0, 150.0],
+            'veh_B': [0.0, 0.0],
             'veh_CU': [40.0, 60.0],
-            'veh_CAI': [8.3, 12.5],
-            'veh_CAII': [4.0, 6.0],
+            'veh_CAI': [0.0, 0.0],
+            'veh_CAII': [0.0, 0.0],
             'veh_total': [152.3, 228.5]
         })
         
-        # Verificar que tiene exactamente las 7 columnas
-        self.assertEqual(len(df_output.columns), 7)
+        # Verificar que tiene exactamente las 9 columnas
+        self.assertEqual(len(df_output.columns), 9)
         self.assertListEqual(list(df_output.columns), expected_cols)
         
         # Verificar que NO tiene columnas prohibidas
-        forbidden_cols = ['veh_bus', 'veh_moto', 'sense_code', 'checkpoint_id', 
-                         'cap_total', 'congruence_id', 'mc2_distance_m']
+        forbidden_cols = ['sense_code', 'checkpoint_id', 'cap_total', 'congruence_id', 'mc2_distance_m']
         for col in forbidden_cols:
             self.assertNotIn(col, df_output.columns)
     
-    def test_rule6_veh_total_nan_if_all_categories_nan(self):
+    def test_rule6_veh_total_nan_if_any_category_nan(self):
         """
-        REGLA 6: veh_total = NaN si todas las categorías son NaN
+        REGLA 6: veh_total = NaN si cualquier categoría queda NaN
         """
-        # OD sin capacidad (todas categorías = NaN)
+        # OD con capacidad completa, pero una categoría con cap>0 y focup NaN
         df_od = pd.DataFrame({
-            'checkpoint_id': ['9999'],
+            'checkpoint_id': ['2001'],
             'sense_code': ['1-3'],
             'origin_id': [1],
             'destination_id': [2],
             'trips_person': [100],
             'intrazonal_factor': [1],
-            'cap_total': [np.nan]
+            'fa': [1.0],
+            'cap_M': [0],
+            'cap_A': [1500],
+            'cap_B': [0],
+            'cap_CU': [500],
+            'cap_CAI': [0],
+            'cap_CAII': [0],
+            'cap_total': [2000],
+            'focup_M': [np.nan],
+            'focup_A': [2.0],
+            'focup_B': [np.nan],
+            'focup_CU': [np.nan],  # <- provoca veh_CU = NaN
+            'focup_CAI': [np.nan],
+            'focup_CAII': [np.nan],
+            'congruence_id': [1],
         })
         
         # Calcular viajes vehiculares
         df_veh = calculate_vehicle_trips(df_od)
         
-        # Verificar que todas las categorías son NaN
-        self.assertTrue(pd.isna(df_veh['veh_auto'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_cu'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_cai'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_caii'].iloc[0]))
+        # Verificar que una categoría quedó NaN por falta de Focup
+        self.assertTrue(pd.isna(df_veh['veh_CU'].iloc[0]))
         
         # veh_total DEBE ser NaN (NO 0)
         self.assertTrue(pd.isna(df_veh['veh_total'].iloc[0]))
@@ -199,8 +225,7 @@ class TestStrictModeV2(unittest.TestCase):
     def test_vehicle_calculation_with_capacity(self):
         """
         Test de cálculo correcto con capacidad válida.
-        Fórmula: veh_X = (trips_person / ocupacion_X) × intrazonal_factor
-        Ocupación: AU=1.5, CU=2.5, CAI=12.0, CAII=25.0
+        Fórmula: veh_cat = (trips_person × intrazonal_factor × FA × share_cat) / focup_cat
         """
         # OD con match exacto
         df_od = pd.DataFrame({
@@ -217,23 +242,17 @@ class TestStrictModeV2(unittest.TestCase):
         
         # Verificar que encontró capacidad
         self.assertFalse(pd.isna(df_matched['cap_total'].iloc[0]))
-        self.assertEqual(df_matched['cap_au'].iloc[0], 1500)
+        self.assertEqual(df_matched['cap_A'].iloc[0], 1500)
         
-        # Calcular viajes vehiculares
+        df_matched['congruence_id'] = 1
         df_veh = calculate_vehicle_trips(df_matched)
-        
-        # Verificar cálculos:
-        # veh_AU = 300 / 1.5 = 200.0
-        # veh_CU = 300 / 2.5 = 120.0
-        # veh_CAI = 300 / 12.0 = 25.0
-        # veh_CAII = 300 / 25.0 = 12.0
-        # veh_total = 200 + 120 + 25 + 12 = 357.0
-        
-        self.assertAlmostEqual(df_veh['veh_auto'].iloc[0], 200.0, places=2)
-        self.assertAlmostEqual(df_veh['veh_cu'].iloc[0], 120.0, places=2)
-        self.assertAlmostEqual(df_veh['veh_cai'].iloc[0], 25.0, places=2)
-        self.assertAlmostEqual(df_veh['veh_caii'].iloc[0], 12.0, places=2)
-        self.assertAlmostEqual(df_veh['veh_total'].iloc[0], 357.0, places=2)
+
+        # cap_A=1500, cap_CU=500, cap_total=2000, FA=1.0, focup_A=2.0, focup_CU=2.0
+        # share_A=0.75 => veh_A=300*1.0*0.75/2=112.5
+        # share_CU=0.25 => veh_CU=300*1.0*0.25/2=37.5
+        self.assertAlmostEqual(df_veh['veh_A'].iloc[0], 112.5, places=4)
+        self.assertAlmostEqual(df_veh['veh_CU'].iloc[0], 37.5, places=4)
+        self.assertAlmostEqual(df_veh['veh_total'].iloc[0], 150.0, places=4)
     
     def test_intrazonal_factor_zeros_vehicles(self):
         """
@@ -247,17 +266,19 @@ class TestStrictModeV2(unittest.TestCase):
             'destination_id': [1],  # Mismo que origen
             'trips_person': [100],
             'intrazonal_factor': [0],  # Anula viajes
-            'cap_total': [2180]  # Capacidad válida
+            'fa': [1.0],
+            'cap_M': [0], 'cap_A': [1500], 'cap_B': [0], 'cap_CU': [500], 'cap_CAI': [0], 'cap_CAII': [0],
+            'cap_total': [2000],
+            'focup_M': [np.nan], 'focup_A': [2.0], 'focup_B': [np.nan], 'focup_CU': [2.0], 'focup_CAI': [np.nan], 'focup_CAII': [np.nan],
+            'congruence_id': [1],
         })
         
         # Calcular viajes vehiculares
         df_veh = calculate_vehicle_trips(df_od)
         
         # Todos los viajes deben ser 0 (no NaN, porque hay capacidad)
-        self.assertEqual(df_veh['veh_auto'].iloc[0], 0.0)
-        self.assertEqual(df_veh['veh_cu'].iloc[0], 0.0)
-        self.assertEqual(df_veh['veh_cai'].iloc[0], 0.0)
-        self.assertEqual(df_veh['veh_caii'].iloc[0], 0.0)
+        self.assertEqual(df_veh['veh_A'].iloc[0], 0.0)
+        self.assertEqual(df_veh['veh_CU'].iloc[0], 0.0)
         self.assertEqual(df_veh['veh_total'].iloc[0], 0.0)
     
     def test_exact_match_checkpoint_and_sense(self):
@@ -278,14 +299,14 @@ class TestStrictModeV2(unittest.TestCase):
         df_matched = match_capacity_to_od(df_od, self.capacity)
         
         # Verificar matches correctos
-        # Fila 0: checkpoint=2001, sense=1-3 → cap_au=1500
-        self.assertEqual(df_matched['cap_au'].iloc[0], 1500)
+        # Fila 0: checkpoint=2001, sense=1-3 → cap_A=1500
+        self.assertEqual(df_matched['cap_A'].iloc[0], 1500)
         
-        # Fila 1: checkpoint=2001, sense=3-1 → cap_au=1400
-        self.assertEqual(df_matched['cap_au'].iloc[1], 1400)
+        # Fila 1: checkpoint=2001, sense=3-1 → cap_A=1400
+        self.assertEqual(df_matched['cap_A'].iloc[1], 1400)
         
-        # Fila 2: checkpoint=2002, sense=1-3 → cap_au=1200
-        self.assertEqual(df_matched['cap_au'].iloc[2], 1200)
+        # Fila 2: checkpoint=2002, sense=1-3 → cap_A=1200
+        self.assertEqual(df_matched['cap_A'].iloc[2], 1200)
 
 
 if __name__ == '__main__':

@@ -1,241 +1,226 @@
-# 470-000 — Diagrama de Flujo KIDO  
-_(versión en Markdown)_
+# FLOW.md — Flujo Normativo KIDO‑Ruteo (Versión Actualizada)
 
-## INICIO
-
-### **Entradas**
-- Red de modelación/OSM (enlaces y nodos)  
-- Zonificación KIDO  
-- Descarga OD KIDO  
-- Archivo de cardinalidad  
-- Factor de ocupación  
-- Dato vial  
+> **Principio rector:** el pipeline debe reflejar la naturaleza real del aforo.
+> El sentido **solo** se deriva cuando el aforo es direccional.
+> Si el aforo es agregado (`Sentido = 0`), **no existe sentido geométrico operativo**.
 
 ---
 
-## **1. Procesamiento inicial OD KIDO**
+## 1. Tipos de queries soportadas
 
-### **Cálculo de centralidad**
-- Calcular centralidad de todos los nodos.  
-- En cada zona → definir como **centroide** el nodo con mayor centralidad  
-  (nodo más conectado = nodo más central).
+### 1.1 Queries de checkpoint (`checkpointXXXX.csv`)
+- Representan flujos OD que **cruzan un punto de control físico**.
+- Pueden usar capacidad **agregada** o **direccional**, según el checkpoint.
 
-**Archivos:**  
-`red.geojson`, `zonificacion.geojson`, `extraccion.csv`
-
----
-
-## **2. Depuración por número de viajes**
-### Condición:
-```
-total_trips < 10 ?
-```
-
-- **SI:**  
-  `total_trips_modif = 1`
-
-- **NO:**  
-  `total_trips_modif = total_trips`
-
-Crear columna **total_trips_modif**
+### 1.2 Queries generales (`general.csv`)
+- **No usan checkpoints**.
+- **No calculan ruteo restringido (MC2)**.
+- **No generan viajes vehiculares modelados**.
+- La salida contractual fija todos los `veh_*` en **0**.
 
 ---
 
-## **3. Identificar intrazonales**
-### Condición:
-```
-origin_name == destination_name ?
-```
+## 2. Ingesta OD (checkpoint queries)
 
-- **SI → intrazonal = 0**  
-- **NO → intrazonal = 1**
-
-Crear columna **intrazonal**
-
-Guardar cambios en `extraccion.csv`.
+1. Se lee el archivo `checkpointXXXX.csv`.
+2. Si el input contiene columnas:
+   - `sense`, `sentido`, `sense_code`, `direction`
+   → **se eliminan inmediatamente**.
+3. Normalización de columnas:
+   - `origin` → `origin_id`
+   - `destination` → `destination_id`
+4. Inferencia de `checkpoint_id` a partir del nombre del archivo.
 
 ---
 
-## **4. Verificar zona de estación**
-Usando `cardinalidad.geojson`.
+## 3. Preparación de viajes
 
-### Pregunta:
-```
-¿El viaje es intrazonal en la zona de la estación?
-```
+### 3.1 Conversión a viajes de personas
 
-- **SI → seguir**
-- **NO → Congruencia = 4**
+- `<10` → `trips_person = 1`
+- valores numéricos `< 10` → `1`
+- `NaN` → `1`
 
----
+### 3.2 Intrazonales
 
-## **5. Generación de vectores de acceso**
-- Generar vector V1 = todos los orígenes  
-- Generar vector V2 = todos los destinos  
-
-### Condición:
-```
-¿La zona del viaje se encuentra en el primer vector de acceso?
-```
-
-- **SI → continuar**
-- **NO → Congruencia = 4, Id_potencial = 1**
+- Si `origin_id == destination_id`:
+  - `intrazonal_factor = 0`
+- En otro caso:
+  - `intrazonal_factor = 1`
 
 ---
 
-## **6. Validación KIDO vs Dato vial**
+## 4. Construcción geométrica
 
-1. Calcular **VolDV-personas**:  
-   ```
-   (dato vial) * (factor de ocupación por tipología) 
-   ```
-   Sumar tipologías A, B, C.
+### 4.1 Red vial
 
-2. Factor:  
-   ```
-   Factor = VolDV-personas / Vol KIDO
-   ```
+- Se carga `red.geojson`.
+- Se construye un **grafo dirigido** con pesos métricos.
 
-### Condición:
-```
-0.95 < Factor < 1.05 ?
-```
+### 4.2 Zonas
 
-- **SI → FIN (validado)**
-- **NO → No confiable**
+- Desde `zonification.geojson`:
+  - Se filtran polígonos `poly_type = 'Core'`.
+  - Cada zona se asigna al **nodo real más cercano** al centroide.
+
+### 4.3 Checkpoints
+
+- Desde `zonification.geojson`:
+  - Se filtran polígonos `poly_type = 'Checkpoint'`.
+  - Cada checkpoint se asigna al **nodo real más cercano** en la red.
 
 ---
 
-## **7. Validación espacial**
+## 5. Ruteo
 
-### 7.1. Verificar paso por enlace de checkpoint
-```
-¿La ruta pasa por el enlace del checkpoint?
-```
+### 5.1 MC — Camino mínimo libre
 
-- **NO → Congruencia 4**
-- **SI → continuar**
+- Se calcula `MC = origin → destination`.
+- Si no existe ruta:
+  - el viaje queda **no viable**.
 
-### 7.2. Generar centroides
-- Coordenadas de nodo origen: `x-o, y-o`  
-- Coordenadas de nodo destino: `x-d, y-d`
+### 5.2 MC2 — Camino mínimo restringido (checkpoint)
 
-### 7.3. Comparar con matriz de conexión
-```
--10% < X < 10% ?
-```
-
-- **NO → Congruencia 4**
-- **SI → Congruencia 3**
-
-### 7.4. Asignar sentido
-Usar `cardinalidad.csv` para asignar el sentido por localización espacial.
+- Se calcula `MC2 = origin → checkpoint → destination`.
+- Si no existe MC2:
+  - el viaje queda **no viable**.
 
 ---
 
-## **8. Crear Matriz de Impedancia (MC)**
+## 6. Clasificación del checkpoint (PASO CLAVE)
 
-Características:
-- Viajes posibles entre todos los pares OD  
-- Atributos: tiempo, distancia, costo  
-- Algoritmo: shortest path  
-- Rutas en MC **NO requieren pasar por el checkpoint**  
+A partir de `summary_capacity.csv`, para cada `checkpoint_id`:
 
-Archivo: `mtx_impedancia.csv`
+- **Checkpoint direccional**
+  - Existe al menos un registro con `Sentido != '0'`.
 
-### Selección del 80%
-1. Crear identificador zona-zona, ej. `1-2`.  
-2. Sumar viajes por este ID.  
-3. Identificar los pares que representan el **80% del total**.  
-4. Exportar rutas nodo a nodo para esos viajes → `Rutas.geojson`.
+- **Checkpoint agregado**
+  - **Todos** los registros tienen `Sentido = '0'`.
+
+Esta clasificación gobierna **todo lo que sigue**.
 
 ---
 
-## **9. Crear segunda Matriz de Impedancia (MC2)**
+## 7. Derivación de sentido
 
-Características:
-- Viajes posibles entre todos los pares OD  
-- Atributos: tiempo, distancia, costo  
-- Algoritmo: **Constrained shortest path / k-shortest path**  
-- Las rutas **sí pasan por el checkpoint**
+### 7.1 Checkpoint direccional
 
-Archivo: `mtx_impedancia2.csv`
+- Se deriva `sense_code` **geométricamente** a partir de la ruta MC2:
+  - nodo anterior → checkpoint → nodo posterior
+  - cálculo de bearings de entrada y salida
+  - mapeo a cardinalidad
+  - construcción del código (`"4-2"`, `"1-3"`, etc.)
+- Se valida contra `sense_cardinality.csv`.
+- Si no se puede derivar o validar:
+  - `sense_code = NaN`.
 
-### Cálculo X
-```
-X = (A–Checkpoint + Checkpoint–B) / (A–B)
-```
+### 7.2 Checkpoint agregado
 
-- Id_potencial = 1 en caso de valores anómalos  
-
----
-
-## **10. Identificar Congruencia**
-```
-¿La congruencia es 4?
-```
-
-- **SI → Id_congruencia = 0**
-- **NO → Id_congruencia = 1**
-
-Actualizar `extraccion.csv`.
+- ❌ **NO se deriva sentido**.
+- ❌ **NO se calculan bearings**.
+- Se fija conceptualmente:
+  - `sense_code = '0'`.
 
 ---
 
-## **11. Crear columna Viajes**
-```
-Viajes =
-id_congruencia * id_potencial * intrazonal * total_trips_modif
-```
+## 8. Capacidad (STRICT MODE)
+
+### 8.1 Checkpoint direccional
+
+- Merge exacto:
+  ```python
+  merge(
+      left_on=['checkpoint_id', 'sense_code'],
+      right_on=['Checkpoint', 'Sentido'],
+      how='left',
+      validate='many_to_one'
+  )
+  ```
+- Si no hay match:
+  - todas las capacidades → `NaN`.
+
+### 8.2 Checkpoint agregado
+
+- Merge exacto solo por:
+  ```python
+  left_on='checkpoint_id', right_on='Checkpoint'
+  ```
+- Se usa la fila con `Sentido = '0'`.
 
 ---
 
-## **12. Cálculo por día**
-- Con columna **fecha** + **Viajes**, generar tabla:  
-  - **tpdes**  
-  - **tpdfs**  
-  - **tpds**  
+## 9. Congruencia
+
+Se asigna `congruence_id = 4 (Impossible)` si ocurre cualquiera:
+
+- No existe MC o MC2.
+- Checkpoint direccional y `sense_code` es `NaN`.
+- Cualquier capacidad requerida es `NaN`.
+- `cap_total == 0`.
+
+En caso contrario, se clasifica según scores internos.
 
 ---
 
-## **13. Cálculo TPDA (viajes persona)**
+## 10. Cálculo de viajes vehiculares
 
-Usando KIDO:
+### 10.1 Condición de cálculo
+
+Los viajes vehiculares **solo se calculan si**:
+
+- `congruence_id != 4`
+- `cap_total` existe y es `> 0`
+
+### 10.2 Fórmula general
+
+Para cada categoría `k ∈ {M, A, B, CU, CAI, CAII}`:
+
+```text
+veh_k = (trips_person × intrazonal_factor × FA × (cap_k / cap_total)) / Focup_k
 ```
-TPDA = volumen / factor de ocupación (A+B+C)
-```
 
-Desde dato vial (**E2**):
-- `dato vial * factor de ocupación (A+B+C)`
+### 10.3 Propagación estricta
 
-KIDO produce **E1**.
+- Si `cap_total` es `NaN` → **todos los `veh_*` = NaN**.
+- Nunca se reemplazan NaN por 0 en checkpoint queries.
 
 ---
 
-## **14. Proporciones por tipo de vehículo**
-- Obtener proporción por tipo  
-- Multiplicar `tpds * proporción`  
+## 11. Salida contractual (checkpoint)
 
-Factor final:
+El CSV final contiene **exactamente**:
+
 ```
-Factor_kido_vs_dato_vial = E2 / E1
+Origen, Destino,
+veh_M, veh_A, veh_B, veh_CU, veh_CAI, veh_CAII,
+veh_total
 ```
+
+- Sin columnas intermedias.
+- Sin rutas, distancias, checkpoint_id ni sense_code.
 
 ---
 
-## **15. Comprobación de la estación**
-```
-Rev_final = Vol KIDO final / Vol KIDO inicial
-```
+## 12. Salida contractual (general)
 
-### Condición:
-```
-Rev_final > 0.95 ?
-```
+Para queries generales:
 
-- **SI → FIN**
-- **NO → No confiable**
+- Todas las columnas `veh_* = 0`.
+- `veh_total = 0`.
+
+Esto es una **salida determinista**, no modelada.
 
 ---
 
-## FIN
+## 13. Principios finales
+
+1. El modelo **no inventa direcciones**.
+2. La geometría **no contradice al aforo**.
+3. Un aforo agregado se respeta como agregado.
+4. Si el dato no existe, el resultado es `NaN`, no una aproximación.
+
+---
+
+**Este FLOW.md es normativo.**
+Cualquier implementación que no lo siga es considerada incorrecta.
+

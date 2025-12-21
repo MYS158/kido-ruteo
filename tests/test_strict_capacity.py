@@ -50,12 +50,11 @@ class TestStrictCapacityMatching:
             'trips_person': [100]
         })
         
-        # Capacity Data: Checkpoint 1-3 has ONLY Sense '0' (Aggregated) and '1-3' (Specific)
+        # Capacity Data: Checkpoint 1-3 has Sense '0' and '1-3' (but NEVER fallback to '0')
         # It does NOT have '4-2'.
         df_capacity = pd.DataFrame({
             'Checkpoint': ['1-3', '1-3'],
             'Sentido': ['0', '1-3'],
-            'TOTAL': [1000, 500],
             'FA': [1.0, 1.0],
             'M': [100, 50],
             'A': [100, 50],
@@ -63,21 +62,20 @@ class TestStrictCapacityMatching:
             'CU': [100, 50],
             'CAI': [100, 50],
             'CAII': [100, 50],
-            'Focup_M': [1, 1],
-            'Focup_A': [1, 1],
-            'Focup_B': [1, 1],
-            'Focup_CU': [1, 1],
-            'Focup_CAI': [1, 1],
-            'Focup_CAII': [1, 1]
+            'Focup_M': [1.0, 1.0],
+            'Focup_A': [1.0, 1.0],
+            'Focup_B': [1.0, 1.0],
+            'Focup_CU': [1.0, 1.0],
+            'Focup_CAI': [1.0, 1.0],
+            'Focup_CAII': [1.0, 1.0],
         })
         
         result = match_capacity_to_od(df_od, df_capacity)
         
         # Assertions: Capacity should be NaN because '4-2' != '0' and '4-2' != '1-3'
         assert pd.isna(result.iloc[0]['cap_total']), "❌ REGLA 3: Capacidad debe ser NaN para sentido no coincidente"
-        assert pd.isna(result.iloc[0]['cap_auto']), "❌ REGLA 3: cap_auto debe ser NaN"
-        assert result.iloc[0]['cap_available'] == False, "❌ REGLA 3: cap_available debe ser False"
-        assert result.iloc[0]['sense_valid'] == False, "❌ REGLA 3: sense_valid debe ser False"
+        for col in ['cap_M', 'cap_A', 'cap_B', 'cap_CU', 'cap_CAI', 'cap_CAII', 'fa', 'focup_M', 'focup_A', 'focup_B', 'focup_CU', 'focup_CAI', 'focup_CAII']:
+            assert pd.isna(result.iloc[0][col]), f"❌ REGLA 3: {col} debe ser NaN"
         print("✅ Test 1: NO fallback a Sentido 0 - PASSED")
 
     def test_exact_match_works(self):
@@ -93,7 +91,6 @@ class TestStrictCapacityMatching:
         df_capacity = pd.DataFrame({
             'Checkpoint': ['1-3'],
             'Sentido': ['1-3'],
-            'TOTAL': [500],
             'FA': [1.5],
             'M': [50], 'A': [100], 'B': [50], 'CU': [100], 'CAI': [100], 'CAII': [100],
             'Focup_M': [1], 'Focup_A': [2], 'Focup_B': [1], 'Focup_CU': [2], 'Focup_CAI': [2], 'Focup_CAII': [2]
@@ -102,9 +99,9 @@ class TestStrictCapacityMatching:
         result = match_capacity_to_od(df_od, df_capacity)
         
         assert result.iloc[0]['cap_total'] == 500, "❌ cap_total debe ser 500"
-        assert result.iloc[0]['capacity_fa'] == 1.5, "❌ FA debe ser 1.5"
-        assert result.iloc[0]['cap_available'] == True, "❌ cap_available debe ser True"
-        assert result.iloc[0]['sense_valid'] == True, "❌ sense_valid debe ser True"
+        assert result.iloc[0]['fa'] == 1.5, "❌ fa debe ser 1.5"
+        assert result.iloc[0]['cap_A'] == 100, "❌ cap_A debe ser 100"
+        assert result.iloc[0]['cap_CU'] == 100, "❌ cap_CU debe ser 100"
         print("✅ Test 2: Match exacto - PASSED")
 
     def test_sense_not_read_from_input(self):
@@ -155,7 +152,6 @@ class TestStrictCapacityMatching:
         # All three should have NaN capacity
         for i in range(3):
             assert pd.isna(result.iloc[i]['cap_total']), f"❌ REGLA 4: Fila {i} debe tener cap_total = NaN"
-            assert result.iloc[i]['cap_available'] == False, f"❌ REGLA 4: Fila {i} cap_available = False"
         
         print("✅ Test 4: Múltiples sentidos faltantes → NaN - PASSED")
 

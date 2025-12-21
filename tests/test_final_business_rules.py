@@ -1,13 +1,6 @@
 import sys
 from unittest.mock import MagicMock
 
-# Mock networkx and osmnx to avoid import errors
-sys.modules["networkx"] = MagicMock()
-sys.modules["osmnx"] = MagicMock()
-
-# Also mock kido_ruteo.pipeline to avoid triggering its imports
-sys.modules["kido_ruteo.pipeline"] = MagicMock()
-
 import pytest
 import pandas as pd
 import numpy as np
@@ -28,21 +21,22 @@ def test_vehicle_calculation_nan_logic():
     # Create a dummy dataframe
     df = pd.DataFrame({
         'trips_person': [100.0, 100.0],
-        'capacity_fa': [1.0, 1.0],
-        'cap_total': [1000.0, np.nan], # One valid, one missing
-        'cap_auto': [500.0, np.nan],
-        'cap_bus': [500.0, np.nan],
-        'cap_cu': [0.0, np.nan],
-        'cap_cai': [0.0, np.nan],
-        'cap_caii': [0.0, np.nan],
-        'focup_auto': [1.5, 1.5],
-        'focup_bus': [20.0, 20.0],
-        'focup_cu': [1.0, 1.0],
-        'focup_cai': [1.0, 1.0],
-        'focup_caii': [1.0, 1.0],
-        'id_potential': [1, 1],
+        'fa': [1.0, 1.0],
+        'cap_M': [0.0, np.nan],
+        'cap_A': [500.0, np.nan],
+        'cap_B': [0.0, np.nan],
+        'cap_CU': [500.0, np.nan],
+        'cap_CAI': [0.0, np.nan],
+        'cap_CAII': [0.0, np.nan],
+        'cap_total': [1000.0, np.nan],
+        'focup_M': [np.nan, np.nan],
+        'focup_A': [2.0, 2.0],
+        'focup_B': [np.nan, np.nan],
+        'focup_CU': [2.0, 2.0],
+        'focup_CAI': [np.nan, np.nan],
+        'focup_CAII': [np.nan, np.nan],
         'congruence_id': [1, 1],
-        'intrazonal_factor': [1, 1]
+        'intrazonal_factor': [1, 1],
     })
     
     # Run calculation
@@ -50,28 +44,29 @@ def test_vehicle_calculation_nan_logic():
     
     # Check valid row
     assert not np.isnan(result.loc[0, 'veh_total']), "Valid row should have a value"
-    assert result.loc[0, 'veh_auto'] > 0
+    assert result.loc[0, 'veh_A'] > 0
     
     # Check NaN row
     assert np.isnan(result.loc[1, 'veh_total']), "Missing capacity should result in NaN veh_total"
-    assert np.isnan(result.loc[1, 'veh_auto']), "Missing capacity should result in NaN veh_auto"
+    assert np.isnan(result.loc[1, 'veh_A']), "Missing capacity should result in NaN veh_A"
 
 def test_vehicle_calculation_no_moto():
     df = pd.DataFrame({
         'trips_person': [100.0], # Changed from trips_person_adjusted because function calculates it
-        'capacity_fa': [1.0],
+        'fa': [1.0],
+        'cap_M': [0.0],
+        'cap_A': [500.0],
+        'cap_B': [0.0],
+        'cap_CU': [500.0],
+        'cap_CAI': [0.0],
+        'cap_CAII': [0.0],
         'cap_total': [1000.0],
-        'cap_auto': [500.0],
-        'cap_bus': [500.0],
-        'cap_cu': [0.0],
-        'cap_cai': [0.0],
-        'cap_caii': [0.0],
-        'focup_auto': [1.5],
-        'focup_bus': [20.0],
-        'focup_cu': [1.0],
-        'focup_cai': [1.0],
-        'focup_caii': [1.0],
-        'id_potential': [1],
+        'focup_M': [np.nan],
+        'focup_A': [2.0],
+        'focup_B': [np.nan],
+        'focup_CU': [2.0],
+        'focup_CAI': [np.nan],
+        'focup_CAII': [np.nan],
         'congruence_id': [1],
         'intrazonal_factor': [1]
     })
@@ -79,7 +74,8 @@ def test_vehicle_calculation_no_moto():
     result = calculate_vehicle_trips(df)
     
     assert 'veh_moto' not in result.columns, "veh_moto should not be in the output"
-    assert 'veh_auto' in result.columns
+    assert 'veh_auto' not in result.columns
+    assert 'veh_A' in result.columns
 
 def test_cardinality_logic():
     # Test basic bearings
