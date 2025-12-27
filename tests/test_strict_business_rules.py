@@ -120,8 +120,8 @@ class TestStrictBusinessRules(unittest.TestCase):
         # Now we expect NaN, not 0.0
         self.assertTrue(np.isnan(df['veh_total'].iloc[0]))
 
-    def test_sense_zero_aggregates_capacity(self):
-        """STRICT: sense_code='0' is invalid and must NOT aggregate capacity."""
+    def test_sense_zero_not_fallback_for_directional_checkpoint(self):
+        """STRICT (FLOW): en checkpoint direccional, sense_code='0' NO hace match ni agrega."""
         df = pd.DataFrame({
             'origin_id': [1],
             'destination_id': [2],
@@ -131,7 +131,7 @@ class TestStrictBusinessRules(unittest.TestCase):
             'intrazonal_factor': [1]
         })
         
-        # Capacity with 2 rows for same checkpoint
+        # Capacity direccional (no existe Sentido='0')
         cap_df = pd.DataFrame({
             'Checkpoint': ['2001', '2001'],
             'Sentido': ['1', '2'],
@@ -146,6 +146,31 @@ class TestStrictBusinessRules(unittest.TestCase):
 
         # No match should happen (cap_total remains NaN)
         self.assertTrue(np.isnan(df_matched['cap_total'].iloc[0]))
+
+    def test_sense_zero_matches_for_aggregated_checkpoint(self):
+        """STRICT (FLOW): en checkpoint agregado (solo Sentido='0'), se hace match por checkpoint y sense_code='0' es válido."""
+        df = pd.DataFrame({
+            'origin_id': [1],
+            'destination_id': [2],
+            'checkpoint_id': ['2002'],
+            # Aunque venga distinto, en agregado se debe fijar a '0'
+            'sense_code': ['1-3'],
+            'trips_person': [100],
+            'intrazonal_factor': [1]
+        })
+
+        cap_df = pd.DataFrame({
+            'Checkpoint': ['2002'],
+            'Sentido': ['0'],
+            'FA': [1.0],
+            'M': [10], 'A': [50], 'B': [10], 'CU': [10], 'CAI': [10], 'CAII': [10],
+            'TOTAL': [100],
+            'Focup_M': [1.0], 'Focup_A': [1.5], 'Focup_B': [20.0], 'Focup_CU': [1.0], 'Focup_CAI': [1.0], 'Focup_CAII': [1.0]
+        })
+
+        df_matched = match_capacity_to_od(df, cap_df)
+        self.assertFalse(np.isnan(df_matched['cap_total'].iloc[0]))
+        self.assertEqual(df_matched['sense_code'].iloc[0], '0')
 
     def test_missing_capacity_keeps_trips_person(self):
         """Test that missing capacity does NOT zero trips_person."""

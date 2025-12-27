@@ -22,10 +22,19 @@ def classify_congruence(df: pd.DataFrame) -> pd.DataFrame:
     else:
         invalid_route = pd.Series([True] * len(df), index=df.index)
 
-    if 'sense_code' in df.columns:
-        invalid_sense = df['sense_code'].isna() | df['sense_code'].astype('string').eq('0')
+    # Sentido: requerido SOLO si el checkpoint es direccional.
+    # Para checkpoints agregados, sense_code='0' es válido (FLOW.md).
+    if 'checkpoint_is_directional' in df.columns:
+        directional = df['checkpoint_is_directional'].astype('boolean').fillna(True)
     else:
-        invalid_sense = pd.Series([True] * len(df), index=df.index)
+        directional = pd.Series([True] * len(df), index=df.index)
+
+    if 'sense_code' in df.columns:
+        sense_is_missing = df['sense_code'].isna()
+        sense_is_zero = df['sense_code'].astype('string').eq('0')
+        invalid_sense = directional & (sense_is_missing | sense_is_zero)
+    else:
+        invalid_sense = directional
 
     invalid_capacity = df['cap_total'].isna() if 'cap_total' in df.columns else pd.Series([True] * len(df), index=df.index)
     zero_capacity = (df['cap_total'] == 0) if 'cap_total' in df.columns else pd.Series([False] * len(df), index=df.index)

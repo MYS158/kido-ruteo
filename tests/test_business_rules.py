@@ -15,7 +15,9 @@ from kido_ruteo.processing.preprocessing import prepare_data
 
 def test_sense_zero_invalid_strict():
     """
-    STRICT: sense_code == '0' es inválido → congruence_id = 4 y NO se calculan veh_*.
+    STRICT (FLOW.md):
+    - Checkpoint direccional: sense_code es obligatorio y '0' es inválido.
+    - Checkpoint agregado (Sentido='0' en capacidad): sense_code='0' es válido.
     """
     df = pd.DataFrame({
         'origin_id': ['1'],

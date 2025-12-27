@@ -96,7 +96,7 @@ class TestStrictModeV2(unittest.TestCase):
         REGLA 3: No existe fallback a sentido 0.
         Si sense_code no hace match exacto, capacidad = NaN.
         """
-        # OD con sense_code='0' (prohibido como fallback)
+        # OD con sense_code='0' (prohibido como fallback en checkpoint DIRECCIONAL)
         df_od = pd.DataFrame({
             'checkpoint_id': ['2001'],
             'sense_code': ['0'],  # NO existe en capacity
