@@ -1,4 +1,11 @@
-# KIDO-Ruteo v2.0 - STRICT MODE Documentation
+# KIDO-Ruteo v2.0 - Documentación de STRICT MODE (OBSOLETA)
+
+> ⚠️ **Documento obsoleto (histórico).**
+> Contiene ejemplos y nomenclatura que ya no corresponden a la implementación actual.
+> Para documentación vigente:
+> - `docs/FLOW.md` (normativo)
+> - `docs/PIPELINE_FULL_EXAMPLE.md` (ejemplo numérico)
+> - `docs/OUTPUT_CREATION_DETAILED_GUIDE.md` (guía paso a paso)
 
 ## 🎯 Filosofía del Sistema
 
@@ -16,7 +23,7 @@ El proyecto KIDO-Ruteo v2.0 opera bajo un modelo de **Validación Estricta** don
 #### Eliminación del Input
 ```python
 # ❌ PROHIBIDO: Leer sentido del archivo de entrada
-df['sense_code'] = input_data['sentido']  # NEVER
+df['sense_code'] = input_data['sentido']  # NUNCA
 
 # ✅ CORRECTO: Eliminar cualquier columna de sentido
 if 'sentido' in df.columns:
@@ -98,27 +105,27 @@ merged = pd.merge(
 ```python
 # ❌ NUNCA hacer esto:
 if sense_code not in capacity:
-    use_sense_0_instead()  # PROHIBITED
+    use_sense_0_instead()  # PROHIBIDO
 ```
 
 ❌ **PROHIBIDO #2**: Sumar sentidos opuestos
 ```python
 # ❌ NUNCA hacer esto:
 if not found('1-3'):
-    cap = cap['3-1'] + cap['1-3']  # PROHIBITED
+    cap = cap['3-1'] + cap['1-3']  # PROHIBIDO
 ```
 
 ❌ **PROHIBIDO #3**: Promediar capacidades
 ```python
 # ❌ NUNCA hacer esto:
-cap = (cap_sense_1 + cap_sense_2) / 2  # PROHIBITED
+cap = (cap_sense_1 + cap_sense_2) / 2  # PROHIBIDO
 ```
 
 ❌ **PROHIBIDO #4**: Inferir simetría direccional
 ```python
 # ❌ NUNCA hacer esto:
 if not found('1-3'):
-    cap['1-3'] = cap['3-1']  # PROHIBITED - No symmetry assumption
+    cap['1-3'] = cap['3-1']  # PROHIBIDO - no asumir simetría
 ```
 
 #### Resultado de No-Match
@@ -435,10 +442,9 @@ merged = merge_on_specific_sense()  # Solo esto. Nada más.
 
 ## 📖 Referencias
 
-- [BUSINESS_INVARIANTS.md](./BUSINESS_INVARIANTS.md): Invariantes del sistema
-- [business_rules.md](./business_rules.md): Reglas de negocio completas
-- [DATA_CONTRACT.md](./DATA_CONTRACT.md): Contrato de datos
-- [output_schema.md](./output_schema.md): Esquema de salida
+- [FLOW.md](./FLOW.md): Flujo normativo vigente
+- [PIPELINE_FULL_EXAMPLE.md](./PIPELINE_FULL_EXAMPLE.md): Ejemplo numérico completo
+- [OUTPUT_CREATION_DETAILED_GUIDE.md](./OUTPUT_CREATION_DETAILED_GUIDE.md): Guía paso a paso
 
 ---
 
@@ -449,7 +455,7 @@ merged = merge_on_specific_sense()  # Solo esto. Nada más.
 - ✅ Forzar derivación geométrica de sense_code
 - ✅ Eliminación de columnas de sentido del input
 - ✅ Manejo estricto de NaN vs 0
-- ✅ Salida limpia con solo 7 columnas
+- ✅ Salida contractual (ver `docs/FLOW.md`)
 - ✅ Suite completa de tests de validación
 
 ### v1.x - Legacy (Deprecated)

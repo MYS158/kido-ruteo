@@ -6,16 +6,17 @@ def calculate_vehicle_trips(df: pd.DataFrame) -> pd.DataFrame:
     Calcula viajes vehiculares (STRICT MODE) según flow.md.
 
     Fórmula:
-        Veh_cat = (Trips_person × intrazonal_factor × FA × Share_cat) / Focup_cat
+        Veh_cat = (Trips_person × (1 - intrazonal_factor) × FA × Share_cat) / Focup_cat
 
     Donde:
       - Share_cat = cap_cat / cap_total
       - Categorías: M, A, B, CU, CAI, CAII
 
-    Guard estricto (bloqueante):
-      - Solo se calcula si:
-          cap_total notna AND cap_total > 0 AND congruence_id != 4
-      - Si no pasa el guard: no se toca esa fila (veh_* permanecen NaN).
+        Guard estricto (bloqueante):
+            - Solo se calcula si:
+                    cap_total notna AND cap_total > 0 AND congruence_id != 4
+            - Si congruence_id == 4 (Impossible): veh_* = 0 (explícito), no NaN.
+            - Si no pasa el guard por otras razones: no se toca esa fila (veh_* permanecen NaN).
 
     Notas STRICT:
       - Para share==0 (cap_cat==0), veh_cat = 0 (no depende de Focup).
@@ -28,7 +29,9 @@ def calculate_vehicle_trips(df: pd.DataFrame) -> pd.DataFrame:
     if 'trips_person' not in df.columns:
         df['trips_person'] = 1.0
     if 'intrazonal_factor' not in df.columns:
-        df['intrazonal_factor'] = 1.0
+        # Interpret intrazonal_factor as: 1 => intrazonal (0 trips), 0 => non-intrazonal
+        # Default to non-intrazonal to avoid wiping trips when the column is absent.
+        df['intrazonal_factor'] = 0.0
     if 'cap_total' not in df.columns:
         df['cap_total'] = np.nan
     if 'congruence_id' not in df.columns:
@@ -56,11 +59,20 @@ def calculate_vehicle_trips(df: pd.DataFrame) -> pd.DataFrame:
         df[veh_cols[cat]] = np.nan
     df['veh_total'] = np.nan
 
+    # STRICT: Congruencia imposible => veh_* debe ser 0 (no NaN)
+    impossible = df['congruence_id'].eq(4)
+    if impossible.any():
+        for cat in categories:
+            df.loc[impossible, veh_cols[cat]] = 0.0
+        df.loc[impossible, 'veh_total'] = 0.0
+
     if not eligible.any():
         return df
 
-    # Trips efectivos (intrazonales anulan)
-    trips_eff = (df['trips_person'] * df['intrazonal_factor']).astype(float)
+    # Trips efectivos: intrazonal_factor==1 anula (0), ==0 deja pasar (1)
+    intrazonal_flag = pd.to_numeric(df['intrazonal_factor'], errors='coerce').fillna(0.0)
+    intrazonal_gate = (1.0 - intrazonal_flag).clip(lower=0.0, upper=1.0)
+    trips_eff = (pd.to_numeric(df['trips_person'], errors='coerce').fillna(1.0) * intrazonal_gate).astype(float)
 
     # Computar por categoría solo donde aplica
     for cat in categories:

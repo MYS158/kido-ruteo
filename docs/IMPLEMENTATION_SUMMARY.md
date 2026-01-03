@@ -1,4 +1,10 @@
-# KIDO-Ruteo v2.0 - Resumen de Implementación STRICT MODE
+# KIDO-Ruteo v2.0 - Resumen de Implementación STRICT MODE (OBSOLETO)
+
+> ⚠️ **Documento obsoleto (histórico).**
+> Este resumen describe decisiones/columnas de una versión anterior.
+> Para el flujo normativo y la salida contractual actual, usar:
+> - `docs/FLOW.md`
+> - `docs/OUTPUT_CREATION_DETAILED_GUIDE.md`
 
 ## ✅ Cambios Completados
 

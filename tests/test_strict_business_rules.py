@@ -4,6 +4,7 @@ import numpy as np
 import os
 import sys
 import tempfile
+import logging
 
 # Add src to path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'src')))
@@ -148,12 +149,12 @@ class TestStrictBusinessRules(unittest.TestCase):
         self.assertTrue(np.isnan(df_matched['cap_total'].iloc[0]))
 
     def test_sense_zero_matches_for_aggregated_checkpoint(self):
-        """STRICT (FLOW): en checkpoint agregado (solo Sentido='0'), se hace match por checkpoint y sense_code='0' es válido."""
+        """STRICT (FLOW): en checkpoint agregado (solo Sentido='0'), se hace match por checkpoint IGNORANDO sense_code y SIN sobrescribirlo."""
         df = pd.DataFrame({
             'origin_id': [1],
             'destination_id': [2],
             'checkpoint_id': ['2002'],
-            # Aunque venga distinto, en agregado se debe fijar a '0'
+            # Sense derivado por geometría (puede ser distinto de '0')
             'sense_code': ['1-3'],
             'trips_person': [100],
             'intrazonal_factor': [1]
@@ -170,7 +171,114 @@ class TestStrictBusinessRules(unittest.TestCase):
 
         df_matched = match_capacity_to_od(df, cap_df)
         self.assertFalse(np.isnan(df_matched['cap_total'].iloc[0]))
-        self.assertEqual(df_matched['sense_code'].iloc[0], '0')
+        # NO sobrescribir el sense_code derivado
+        self.assertEqual(df_matched['sense_code'].iloc[0], '1-3')
+
+    def test_aggregated_checkpoint_allows_derived_sense_and_computes_vehicles(self):
+        """Checkpoint agregado: Sentido='0' aplica a cualquier sense_code derivado; congruence=1; veh_* numéricos."""
+        df = pd.DataFrame({
+            'origin_id': [1],
+            'destination_id': [2],
+            'checkpoint_id': ['3000'],
+            'sense_code': ['4-2'],
+            'trips_person': [100],
+            'intrazonal_factor': [1],
+            'has_valid_path': [True],
+        })
+
+        cap_df = pd.DataFrame({
+            'Checkpoint': ['3000'],
+            'Sentido': ['0'],
+            'FA': [1.0],
+            'M': [0], 'A': [50], 'B': [0], 'CU': [50], 'CAI': [0], 'CAII': [0],
+            'TOTAL': [100],
+            'Focup_M': [np.nan],
+            'Focup_A': [2.0],
+            'Focup_B': [np.nan],
+            'Focup_CU': [2.0],
+            'Focup_CAI': [np.nan],
+            'Focup_CAII': [np.nan],
+        })
+
+        df = match_capacity_to_od(df, cap_df)
+        self.assertFalse(np.isnan(df['cap_total'].iloc[0]))
+
+        df = classify_congruence(df)
+        self.assertEqual(df['congruence_id'].iloc[0], 1)
+
+        df = calculate_vehicle_trips(df)
+        self.assertFalse(np.isnan(df['veh_A'].iloc[0]))
+        self.assertFalse(np.isnan(df['veh_CU'].iloc[0]))
+        self.assertAlmostEqual(df['veh_A'].iloc[0], 25.0, places=6)
+        self.assertAlmostEqual(df['veh_CU'].iloc[0], 25.0, places=6)
+        self.assertAlmostEqual(df['veh_total'].iloc[0], 50.0, places=6)
+
+    def test_directional_checkpoint_two_senses_missing_match_is_impossible(self):
+        """Checkpoint direccional (2 sentidos explícitos): si sense_code no existe en capacity => cap NaN, congruence=4, veh NaN."""
+        df = pd.DataFrame({
+            'origin_id': [1],
+            'destination_id': [2],
+            'checkpoint_id': ['4000'],
+            'sense_code': ['9-9'],
+            'trips_person': [100],
+            'intrazonal_factor': [1],
+            'has_valid_path': [True],
+        })
+
+        cap_df = pd.DataFrame({
+            'Checkpoint': ['4000', '4000'],
+            'Sentido': ['1-3', '3-1'],
+            'FA': [1.0, 1.0],
+            'M': [0, 0], 'A': [50, 50], 'B': [0, 0], 'CU': [50, 50], 'CAI': [0, 0], 'CAII': [0, 0],
+            'TOTAL': [100, 100],
+            'Focup_M': [np.nan, np.nan],
+            'Focup_A': [2.0, 2.0],
+            'Focup_B': [np.nan, np.nan],
+            'Focup_CU': [2.0, 2.0],
+            'Focup_CAI': [np.nan, np.nan],
+            'Focup_CAII': [np.nan, np.nan],
+        })
+
+        df = match_capacity_to_od(df, cap_df)
+        self.assertTrue(np.isnan(df['cap_total'].iloc[0]))
+
+        df = classify_congruence(df)
+        self.assertEqual(df['congruence_id'].iloc[0], 4)
+
+        df = calculate_vehicle_trips(df)
+        self.assertTrue(np.isnan(df['veh_total'].iloc[0]))
+
+    def test_mixed_checkpoint_warns_and_treats_as_directional(self):
+        """Checkpoint mixto (Sentido 0 y !=0): warning y comportamiento direccional (sin fallback a 0)."""
+        df = pd.DataFrame({
+            'origin_id': [1],
+            'destination_id': [2],
+            'checkpoint_id': ['5000'],
+            'sense_code': ['0'],
+            'trips_person': [100],
+            'intrazonal_factor': [1],
+        })
+
+        cap_df = pd.DataFrame({
+            'Checkpoint': ['5000', '5000'],
+            'Sentido': ['0', '1-3'],
+            'FA': [1.0, 1.0],
+            'M': [0, 0], 'A': [50, 50], 'B': [0, 0], 'CU': [50, 50], 'CAI': [0, 0], 'CAII': [0, 0],
+            'TOTAL': [100, 100],
+            'Focup_M': [np.nan, np.nan],
+            'Focup_A': [2.0, 2.0],
+            'Focup_B': [np.nan, np.nan],
+            'Focup_CU': [2.0, 2.0],
+            'Focup_CAI': [np.nan, np.nan],
+            'Focup_CAII': [np.nan, np.nan],
+        })
+
+        with self.assertLogs('kido_ruteo.capacity.matcher', level=logging.WARNING):
+            df = match_capacity_to_od(df, cap_df)
+
+        # Mixto => direccional => no match para sense_code='0'
+        self.assertTrue(df['checkpoint_is_directional'].iloc[0])
+        self.assertTrue(np.isnan(df['cap_total'].iloc[0]))
 
     def test_missing_capacity_keeps_trips_person(self):
         """Test that missing capacity does NOT zero trips_person."""

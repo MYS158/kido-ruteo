@@ -1,0 +1,32 @@
+"""
+utils
+
+Módulos de utilidad para debugging y visualización del pipeline KIDO.
+"""
+
+from .debug_config import (
+    DEBUG_MODE_ENABLED,
+    DEBUG_CHECKPOINT_ID,
+    DEBUG_OUTPUT_DIR,
+    DEBUG_GENERATE_ROUTE_PLOTS,
+    DEBUG_GENERATE_SENSE_PLOTS,
+    DEBUG_GENERATE_LOGIC_FLOW,
+    DEBUG_VERBOSE_LOGGING,
+    DEBUG_MAX_ROUTE_PLOTS,
+    DEBUG_STRICT_VALIDATIONS,
+)
+
+from .debug_tracer import DebugTracer
+
+__all__ = [
+    'DEBUG_MODE_ENABLED',
+    'DEBUG_CHECKPOINT_ID',
+    'DEBUG_OUTPUT_DIR',
+    'DEBUG_GENERATE_ROUTE_PLOTS',
+    'DEBUG_GENERATE_SENSE_PLOTS',
+    'DEBUG_GENERATE_LOGIC_FLOW',
+    'DEBUG_VERBOSE_LOGGING',
+    'DEBUG_MAX_ROUTE_PLOTS',
+    'DEBUG_STRICT_VALIDATIONS',
+    'DebugTracer',
+]

@@ -1,4 +1,11 @@
-# RESUMEN DE CORRECCIONES - STRICT MODE V2.0
+# RESUMEN DE CORRECCIONES - STRICT MODE V2.0 (OBSOLETO)
+
+> ⚠️ **Documento obsoleto (histórico).**
+> Este archivo refleja una iteración anterior (p.ej. salida de 7 columnas y categorías tipo `veh_AU`).
+> La referencia vigente para reglas y columnas contractuales es:
+> - `docs/FLOW.md`
+> - `docs/PIPELINE_FULL_EXAMPLE.md`
+> - `docs/OUTPUT_CREATION_DETAILED_GUIDE.md`
 
 ## 📋 CAMBIOS REALIZADOS
 

@@ -84,17 +84,17 @@ En este ejemplo:
 - `total_trips = 250` ⇒ `trips_person = 250`
 
 - Factor intrazonal (`intrazonal_factor`):
-  - Si `origin_id == destination_id` ⇒ 0
-  - Si `origin_id != destination_id` ⇒ 1
+  - Si `origin_id == destination_id` ⇒ 1 (intrazonal ⇒ 0 viajes)
+  - Si `origin_id != destination_id` ⇒ 0 (no intrazonal)
 
 En este ejemplo:
-- `1002 != 1001` ⇒ `intrazonal_factor = 1`
+- `1002 != 1001` ⇒ `intrazonal_factor = 0`
 
 Estado de la fila al final del Paso 1 (conceptual):
 
 | origin_id | destination_id | checkpoint_id | trips_person | intrazonal_factor |
 |---:|---:|---:|---:|---:|
-| 1002 | 1001 | 2002 | 250 | 1 |
+| 1002 | 1001 | 2002 | 250 | 0 |
 
 ---
 
@@ -220,14 +220,14 @@ cap_total notna AND cap_total > 0 AND congruence_id != 4
 Para cada categoría `k ∈ {M, A, B, CU, CAI, CAII}`:
 
 ```text
-veh_k = (trips_person × intrazonal_factor × fa × (cap_k / cap_total)) / focup_k
+veh_k = (trips_person × (1 - intrazonal_factor) × fa × (cap_k / cap_total)) / focup_k
 ```
 
 ### 8.3 Cálculo numérico del ejemplo
 
 Datos:
 - `trips_person = 250`
-- `intrazonal_factor = 1`
+- `intrazonal_factor = 0` ⇒ `(1 - intrazonal_factor) = 1`
 - `fa = 1.1`
 - `cap_total = 215`
 - Capacidades: M=100, A=50, B=30, CU=20, CAI=10, CAII=5

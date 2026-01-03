@@ -48,17 +48,28 @@ def _load_valid_sense_codes(catalog_path: Optional[str] = None) -> set[str]:
 
 def calculate_bearing(G, u, v):
     """Calculates bearing from node u to node v in degrees (0=N, 90=E)."""
-    try:
-        x1, y1 = G.nodes[u]['x'], G.nodes[u]['y']
-        x2, y2 = G.nodes[v]['x'], G.nodes[v]['y']
-        dx = x2 - x1
-        dy = y2 - y1
-        angle = math.degrees(math.atan2(dx, dy))
-        if angle < 0:
-            angle += 360
-        return angle
-    except KeyError:
+    def _xy(n):
+        data = G.nodes.get(n, {})
+        if 'x' in data and 'y' in data:
+            return data['x'], data['y']
+        p = data.get('pos')
+        if isinstance(p, (tuple, list)) and len(p) == 2:
+            return p[0], p[1]
         return None
+
+    p1 = _xy(u)
+    p2 = _xy(v)
+    if p1 is None or p2 is None:
+        return None
+
+    x1, y1 = p1
+    x2, y2 = p2
+    dx = x2 - x1
+    dy = y2 - y1
+    angle = math.degrees(math.atan2(dx, dy))
+    if angle < 0:
+        angle += 360
+    return angle
 
 def get_cardinality(bearing, is_origin=False):
     """Maps bearing to cardinality code (1=N, 2=E, 3=S, 4=W)."""
@@ -121,6 +132,10 @@ def derive_sense_from_path(G: nx.Graph, path: List[str], checkpoint_node: str) -
     dest_card = get_cardinality(bearing_out, is_origin=False)
     
     if origin_card and dest_card:
+        # STRICT: sentidos iguales (ej. 4-4, 1-1) se consideran inválidos/indeterminados
+        # y deben mapearse a '0'.
+        if origin_card == dest_card:
+            return '0'
         return f"{origin_card}-{dest_card}"
     return None
 
@@ -196,7 +211,10 @@ def compute_mc2_matrix(
         if path:
             sense_candidate = derive_sense_from_path(G, path, checkpoint)
 
-        if sense_candidate and (sense_candidate in valid_sense_codes) and (sense_candidate != '0'):
+        if sense_candidate == '0':
+            # '0' es el código de sentido agregado/indeterminado.
+            derived_senses.append('0')
+        elif sense_candidate and (sense_candidate in valid_sense_codes) and (sense_candidate != '0'):
             derived_senses.append(sense_candidate)
         else:
             derived_senses.append(np.nan)

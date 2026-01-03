@@ -1,5 +1,8 @@
 import pandas as pd
 import numpy as np
+import logging
+
+logger = logging.getLogger(__name__)
 
 def match_capacity_to_od(df_od: pd.DataFrame, df_capacity: pd.DataFrame) -> pd.DataFrame:
     """
@@ -69,6 +72,25 @@ def match_capacity_to_od(df_od: pd.DataFrame, df_capacity: pd.DataFrame) -> pd.D
         .groupby('Checkpoint', dropna=False)['_is_dir']
         .any()
     )
+
+    # STRICT: checkpoints mixtos (tienen Sentido='0' y también sentidos explícitos)
+    # Se tratan como direccionales (por dir_flags), pero se documenta con warning.
+    mixed_flags = (
+        df_capacity_slim
+        .assign(
+            _has_zero=df_capacity_slim['Sentido'].eq('0'),
+            _has_nonzero=df_capacity_slim['Sentido'].notna() & ~df_capacity_slim['Sentido'].eq('0'),
+        )
+        .groupby('Checkpoint', dropna=False)[['_has_zero', '_has_nonzero']]
+        .any()
+    )
+    mixed_checkpoints = mixed_flags.index[mixed_flags['_has_zero'] & mixed_flags['_has_nonzero']].tolist()
+    if mixed_checkpoints:
+        logger.warning(
+            "STRICT MODE: Detectados checkpoints mixtos en capacity (Sentido '0' y != '0'). "
+            "Se tratarán como DIRECCIONALES (sin fallback a '0'). Checkpoints: %s",
+            mixed_checkpoints,
+        )
     df_od['checkpoint_is_directional'] = df_od['checkpoint_id'].map(dir_flags).astype('boolean')
 
     # Desconocidos (checkpoint no presente en capacity) => mantener strict:
@@ -88,9 +110,13 @@ def match_capacity_to_od(df_od: pd.DataFrame, df_capacity: pd.DataFrame) -> pd.D
     # --- 1) Direccional: merge exacto por (checkpoint_id, sense_code) ---
     dir_mask = checkpoint_is_directional
     if dir_mask.any():
+        # STRICT: en direccional (incluyendo mixtos), Sentido='0' NO participa en el match.
+        # Esto evita que sense_code='0' haga match accidentalmente.
+        df_capacity_dir = df_capacity_slim[~df_capacity_slim['Sentido'].eq('0')].copy()
+
         merged_dir = pd.merge(
             df_od.loc[dir_mask].drop(columns=out_cols, errors='ignore'),
-            df_capacity_slim,
+            df_capacity_dir,
             left_on=['checkpoint_id', 'sense_code'],
             right_on=['Checkpoint', 'Sentido'],
             how='left',
@@ -126,7 +152,8 @@ def match_capacity_to_od(df_od: pd.DataFrame, df_capacity: pd.DataFrame) -> pd.D
     # --- 2) Agregado: merge SOLO por checkpoint, usando Sentido == '0' ---
     agg_mask = ~checkpoint_is_directional
     if agg_mask.any():
-        # En agregado, el sentido geométrico no aplica.
+        # STRICT MODE: En checkpoints agregados, el sentido geométrico NO se usa.
+        # Se fija explícitamente a '0' para dejarlo claro en trazas/análisis.
         df_od.loc[agg_mask, 'sense_code'] = '0'
 
         df_capacity_zero = df_capacity_slim[df_capacity_slim['Sentido'].eq('0')].copy()

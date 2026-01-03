@@ -18,6 +18,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from kido_ruteo.pipeline import run_pipeline
+from kido_ruteo.routing.graph_loader import infer_bbox_from_queries_and_zonification
 
 def main():
     # Definición de rutas
@@ -48,8 +49,17 @@ def main():
         
     capacity_path = data_dir / "raw" / "capacity" / "summary_capacity.csv"
     
-    # Bounding Box para Querétaro (aprox)
-    osm_bbox = [20.8, 19.9, -99.7, -100.9]
+    # BBox: inferir desde el conjunto de queries + zonificación (con padding)
+    # Esto asegura que, si falta la red, la descarga OSM cubra TODAS las zonas relevantes.
+    osm_bbox = list(
+        infer_bbox_from_queries_and_zonification(
+            [str(p) for p in files_to_process],
+            str(zonification_path),
+            padding_ratio=0.10,
+            min_padding_deg=0.01,
+            ensure_covers_zonification=True,
+        )
+    )
     
     # Directorio de salida
     output_dir = data_dir / "processed"
@@ -59,6 +69,7 @@ def main():
     print(f"  - Zonificación: {zonification_path}")
     print(f"  - Red Vial: {network_path}")
     print(f"  - Capacidad: {capacity_path}")
+    print(f"  - OSM bbox (inferido): {osm_bbox}")
     print(f"Salida: {output_dir}")
     print("==================================================")
     

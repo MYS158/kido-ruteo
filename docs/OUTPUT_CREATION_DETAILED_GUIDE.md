@@ -1,7 +1,11 @@
 # GUÍA DETALLADA: CREACIÓN DE ARCHIVOS DE SALIDA EN KIDO
 
 ## 🎯 OBJETIVO
-Transformar un archivo CSV de origen-destino (`checkpoint2002.csv`) en un archivo de salida (`processed_checkpoint2002.csv`) con 7 columnas de viajes vehiculares.
+Transformar un archivo CSV de origen-destino (`checkpoint2002.csv`) en un archivo de salida contractual (`processed_checkpoint2002.csv`) con las columnas vehiculares definidas por el pipeline.
+
+Salida contractual actual (checkpoint queries):
+- `Origen`, `Destino`
+- `veh_M`, `veh_A`, `veh_B`, `veh_CU`, `veh_CAI`, `veh_CAII`, `veh_total`
 
 ---
 
@@ -80,10 +84,10 @@ df['trips_person'].fillna(1)
 
 **Calcular factor intrazonal:**
 ```python
-# Si origin_id == destination_id → intrazonal_factor = 0 (anula el viaje)
-# Si origin_id != destination_id → intrazonal_factor = 1 (mantiene el viaje)
+# intrazonal_factor: 1 si es intrazonal (mismo origen/destino), 0 si NO
+# Interpretación: intrazonal_factor == 1 ⇒ 0 viajes
 df['intrazonal_factor'] = np.where(
-    df['origin_id'] == df['destination_id'], 0, 1
+    df['origin_id'] == df['destination_id'], 1, 0
 )
 ```
 
@@ -100,7 +104,7 @@ Nuevas columnas: checkpoint_id, trips_person, intrazonal_factor, is_intrazonal
 
 #### 2.1 Cargar red desde GeoJSON
 ```python
-G = load_graph_from_geojson('data/raw/red_extended.geojson')
+G = load_graph_from_geojson('data/raw/red.geojson')
 # NetworkX MultiDiGraph con 95 nodos, 111 aristas
 ```
 
@@ -525,73 +529,32 @@ Nuevas columnas: id_potential, detour_ratio, score_*, congruence_id, congruence_
 
 Función: `calculate_vehicle_trips()`
 
-#### 9.1 Aplicar factores de ocupación
-```python
-# Factores de ocupación vehicular (personas/vehículo)
-OCCUPANCY = {
-    'auto': 1.5,
-    'cu': 2.5,
-    'cai': 12.0,
-    'caii': 25.0
-}
+#### 9.1 Guardas y fórmula (implementación actual)
 
-# Para cada tipo de vehículo:
-df['veh_auto'] = (df['trips_person'] / OCCUPANCY['auto']) * df['intrazonal_factor']
-df['veh_cu'] = (df['trips_person'] / OCCUPANCY['cu']) * df['intrazonal_factor']
-df['veh_cai'] = (df['trips_person'] / OCCUPANCY['cai']) * df['intrazonal_factor']
-df['veh_caii'] = (df['trips_person'] / OCCUPANCY['caii']) * df['intrazonal_factor']
+En checkpoint queries, los viajes vehiculares se calculan por categoría `k ∈ {M, A, B, CU, CAI, CAII}` usando capacidad + ocupación:
+
+```text
+veh_k = (trips_person × (1 - intrazonal_factor) × FA × (cap_k / cap_total)) / Focup_k
 ```
 
-#### 9.2 **STRICT MODE: Propagar NaN**
-```python
-# Si cap_total es NaN → TODOS los veh_* deben ser NaN
-missing_capacity = df['cap_total'].isna()
+Guardas normativas:
+- Si `congruence_id == 4` (Impossible): `veh_* = 0` y `veh_total = 0`.
+- Si `intrazonal_factor == 1` (intrazonal): el factor `(1 - intrazonal_factor)` anula la demanda.
 
-df.loc[missing_capacity, 'veh_auto'] = np.nan
-df.loc[missing_capacity, 'veh_cu'] = np.nan
-df.loc[missing_capacity, 'veh_cai'] = np.nan
-df.loc[missing_capacity, 'veh_caii'] = np.nan
+#### 9.2 Nota sobre NaN vs 0
 
-# NUNCA convertir NaN a 0
-```
+En la implementación actual, el caso “sin datos suficientes” (ruta inválida, sentido inválido en direccionales, capacidad faltante, etc.) se clasifica como `congruence_id == 4`, y por regla contractual eso produce `veh_* = 0`.
 
-#### 9.3 Calcular total
-```python
-df['veh_total'] = (
-    df['veh_auto'].fillna(0) + 
-    df['veh_cu'].fillna(0) + 
-    df['veh_cai'].fillna(0) + 
-    df['veh_caii'].fillna(0)
-)
+#### 9.3 Total
 
-# Si TODOS los veh_* son NaN → veh_total = 0
-# Luego convertir ese 0 a NaN:
-all_nan = df[['veh_auto', 'veh_cu', 'veh_cai', 'veh_caii']].isna().all(axis=1)
-df.loc[all_nan, 'veh_total'] = np.nan
-```
+`veh_total` corresponde a la suma de las categorías calculadas y se fuerza a `0` en `congruence_id == 4`.
 
-**Ejemplo de cálculo:**
-```python
-# Fila con trips_person=250, intrazonal_factor=1, cap_total=1700:
-veh_auto = 250 / 1.5 * 1 = 166.67
-veh_cu = 250 / 2.5 * 1 = 100.00
-veh_cai = 250 / 12.0 * 1 = 20.83
-veh_caii = 250 / 25.0 * 1 = 10.00
-veh_total = 166.67 + 100.00 + 20.83 + 10.00 = 297.50
+**Ejemplo (conceptual):**
 
-# Fila con sense_code=None (sin capacidad):
-veh_auto = NaN
-veh_cu = NaN
-veh_cai = NaN
-veh_caii = NaN
-veh_total = NaN
-```
+- Si es no intrazonal (`intrazonal_factor = 0`) y es congruente (`congruence_id != 4`), se aplica la fórmula con `FA`, `cap_k/cap_total` y `Focup_k`.
+- Si es intrazonal (`intrazonal_factor = 1`) o `congruence_id == 4`, el resultado vehicular es `0`.
 
-**Estado al final del Paso 9:**
-```
-18956 filas × 38 columnas
-Nuevas columnas: veh_auto, veh_cu, veh_cai, veh_caii, veh_total
-```
+**Estado al final del Paso 9:** se agregan columnas `veh_M`, `veh_A`, `veh_B`, `veh_CU`, `veh_CAI`, `veh_CAII`, `veh_total`.
 
 ---
 
@@ -600,27 +563,23 @@ Nuevas columnas: veh_auto, veh_cu, veh_cai, veh_caii, veh_total
 
 #### 10.1 Renombrar columnas según especificación
 ```python
-rename_map = {
+df_od = df_od.rename(columns={
     'origin_id': 'Origen',
     'destination_id': 'Destino',
-    'veh_auto': 'veh_AU',
-    'veh_cu': 'veh_CU',
-    'veh_cai': 'veh_CAI',
-    'veh_caii': 'veh_CAII'
-}
-
-df_od = df_od.rename(columns=rename_map)
+})
 ```
 
-#### 10.2 Seleccionar SOLO las 7 columnas finales
+#### 10.2 Seleccionar SOLO las columnas contractuales
 ```python
 output_columns = [
     'Origen',      # ID de zona origen
     'Destino',     # ID de zona destino
-    'veh_AU',      # Vehículos tipo Auto
-    'veh_CU',      # Vehículos tipo Camioneta Utilitaria
-    'veh_CAI',     # Vehículos tipo Camión Articulado I
-    'veh_CAII',    # Vehículos tipo Camión Articulado II
+    'veh_M',
+    'veh_A',
+    'veh_B',
+    'veh_CU',
+    'veh_CAI',
+    'veh_CAII',
     'veh_total'    # Total de vehículos
 ]
 
@@ -641,22 +600,22 @@ df_final.to_csv(output_file, index=False)
 
 **Contenido:**
 ```csv
-Origen,Destino,veh_AU,veh_CU,veh_CAI,veh_CAII,veh_total
-1001,1002,NaN,NaN,NaN,NaN,NaN
-1002,1001,NaN,NaN,NaN,NaN,NaN
-115,1001,NaN,NaN,NaN,NaN,NaN
+Origen,Destino,veh_M,veh_A,veh_B,veh_CU,veh_CAI,veh_CAII,veh_total
+1001,1002,0,0,0,0,0,0,0
+1002,1001,0,0,0,0,0,0,0
+115,1001,0,0,0,0,0,0,0
 ...
 ```
 
 **Estructura:**
 ```
-18956 filas × 7 columnas
-TODAS las filas = NaN (porque sense_code = None por falta de geometría válida)
+18956 filas × 9 columnas
+Nota: valores 0 suelen corresponder a casos intrazonales o `congruence_id == 4`.
 ```
 
 ---
 
-## ⚠️ POR QUÉ SALEN TODO NaN
+## ⚠️ POR QUÉ PUEDEN SALIR MUCHOS CEROS
 
 ### Cadena de causas:
 
@@ -669,23 +628,21 @@ TODAS las filas = NaN (porque sense_code = None por falta de geometría válida)
    - Las distancias son irreales (cientos de kilómetros de desvío)
    - `mc2_distance_m` = valores muy grandes o NaN
 
-3. **sense_code = None**
-   - La función `derive_sense_from_path()` recibe rutas inválidas
-   - No puede calcular bearings correctos
-   - Retorna `sense_code = None`
+3. **sense_code no derivable/usable (direccionales)**
+    - La función de derivación puede no producir un código válido
+    - En ese caso, el flujo marca el OD como no congruente
 
 4. **Sin match de capacidad**
-   - Al hacer merge con `(checkpoint_id='2002', sense_code=None)`
-   - No encuentra fila en summary_capacity.csv
-   - Resultado: `cap_au=NaN, cap_cu=NaN, ..., cap_total=NaN`
+    - En direccionales: el match es por `(checkpoint_id, sense_code)`
+    - En agregados: el match es solo por `checkpoint_id` usando `Sentido='0'`
+    - Si no hay capacidad aplicable, el OD queda no congruente
 
-5. **Propagación de NaN**
-   - STRICT MODE: Si `cap_total.isna()` → todos los `veh_*` = NaN
-   - `veh_total` = NaN
+5. **Regla contractual**
+    - Si el OD queda como `congruence_id == 4`, entonces `veh_* = 0`.
 
-6. **Salida final**
-   - 7 columnas, todas con NaN
-   - **NO hay datos de viajes porque NO hay geometría válida**
+6. **Salida final (contractual)**
+    - 9 columnas: `Origen`, `Destino`, `veh_M`, `veh_A`, `veh_B`, `veh_CU`, `veh_CAI`, `veh_CAII`, `veh_total`
+    - Valores en `0` suelen corresponder a intrazonales o `congruence_id == 4`.
 
 ---
 
@@ -694,11 +651,11 @@ TODAS las filas = NaN (porque sense_code = None por falta de geometría válida)
 Si los checkpoints estuvieran cerca de la red (<1km):
 
 ```csv
-Origen,Destino,veh_AU,veh_CU,veh_CAI,veh_CAII,veh_total
-1001,1002,166.67,100.00,20.83,10.00,297.50
-1002,1001,0.67,0.40,0.08,0.04,1.19
-115,1001,10.00,6.00,1.25,0.50,17.75
-119,1001,133.33,80.00,16.67,6.67,236.67
+Origen,Destino,veh_M,veh_A,veh_B,veh_CU,veh_CAI,veh_CAII,veh_total
+1001,1002,10.00,45.00,5.00,12.00,3.00,1.00,76.00
+1002,1001,0.00,0.50,0.10,0.20,0.05,0.00,0.85
+115,1001,1.00,4.00,0.50,1.50,0.30,0.10,7.40
+119,1001,8.00,30.00,4.00,9.00,2.00,0.50,53.50
 ...
 ```
 
@@ -706,7 +663,7 @@ Con:
 - Rutas MC2 válidas (distancias razonables)
 - sense_code derivado correctamente (ej: "1-3", "3-1")
 - Capacidad matched (ej: cap_total = 1700)
-- Viajes calculados según ocupación vehicular
+- Viajes calculados usando `FA`, shares `cap_k/cap_total` y `Focup_k` por categoría
 
 ---
 
@@ -715,8 +672,8 @@ Con:
 **Transformación completa:**
 ```
 checkpoint2002.csv (8 columnas, trips_person)
-    ↓ [10 pasos de procesamiento]
-processed_checkpoint2002.csv (7 columnas, veh_*)
+    ↓ [9 pasos de procesamiento]
+processed_checkpoint2002.csv (9 columnas, veh_*)
 ```
 
 **Pasos críticos:**
@@ -724,17 +681,16 @@ processed_checkpoint2002.csv (7 columnas, veh_*)
 2. ✅ Asignación de centroides a nodos de red
 3. ✅ Carga de checkpoints desde zonification.geojson
 4. ✅ Cálculo de rutas MC y MC2
-5. ⭐ **Derivación geométrica de sense_code** (ÚNICA fuente)
+5. ⭐ **Derivación geométrica de sense_code** (solo checkpoints direccionales)
 6. ✅ Match exacto con capacidad (sin fallback)
 7. ✅ Clasificación de congruencia
 8. ✅ Cálculo de viajes vehiculares
-9. ✅ Propagación estricta de NaN
-10. ✅ Salida limpia de 7 columnas
+9. ✅ Salida contractual limpia (solo columnas contractuales)
 
-**Razón de NaN actuales:**
+**Razón de muchos ceros (cuando ocurre):**
 - Desalineación geográfica entre red, zonas y checkpoints
 - Imposible calcular rutas y sentidos válidos
-- Sin sentido → sin capacidad → sin viajes
+- Sin sentido/capacidad aplicable → `congruence_id == 4` → `veh_* = 0`
 
 **Solución necesaria:**
 - Red vial que cubra la región de los checkpoints

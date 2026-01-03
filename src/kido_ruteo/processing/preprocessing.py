@@ -61,15 +61,13 @@ def prepare_data(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = df[col].astype(str).str.replace('.0', '', regex=False)
             
     # 3. Calcular intrazonal
-    # Flow: SI es intrazonal -> intrazonal=0 (factor), NO -> intrazonal=1
+    # intrazonal_factor: 1 si es intrazonal (mismo origen/destino), 0 si NO
     if 'origin_id' in df.columns and 'destination_id' in df.columns:
-        # Si origen == destino, es intrazonal -> factor 0
-        # Si origen != destino, no es intrazonal -> factor 1
-        df['intrazonal_factor'] = np.where(df['origin_id'] == df['destination_id'], 0, 1)
+        df['intrazonal_factor'] = np.where(df['origin_id'] == df['destination_id'], 1, 0)
         # Mantener flag booleano por si acaso
         df['is_intrazonal'] = df['origin_id'] == df['destination_id']
     else:
-        df['intrazonal_factor'] = 1
+        df['intrazonal_factor'] = 0
         df['is_intrazonal'] = False
             
     return df

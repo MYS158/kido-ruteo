@@ -44,9 +44,13 @@
 ### 3.2 Intrazonales
 
 - Si `origin_id == destination_id`:
-  - `intrazonal_factor = 0`
-- En otro caso:
   - `intrazonal_factor = 1`
+- En otro caso:
+  - `intrazonal_factor = 0`
+
+Interpretación normativa:
+- `intrazonal_factor = 1` significa **intrazonal** ⇒ **0 viajes**.
+- `intrazonal_factor = 0` significa **no intrazonal** ⇒ viajes normales.
 
 ---
 
@@ -171,18 +175,21 @@ Los viajes vehiculares **solo se calculan si**:
 - `congruence_id != 4`
 - `cap_total` existe y es `> 0`
 
+Además:
+- Si `intrazonal_factor == 1` (intrazonal), el resultado vehicular es **0**.
+
 ### 10.2 Fórmula general
 
 Para cada categoría `k ∈ {M, A, B, CU, CAI, CAII}`:
 
 ```text
-veh_k = (trips_person × intrazonal_factor × FA × (cap_k / cap_total)) / Focup_k
+veh_k = (trips_person × (1 - intrazonal_factor) × FA × (cap_k / cap_total)) / Focup_k
 ```
 
 ### 10.3 Propagación estricta
 
-- Si `cap_total` es `NaN` → **todos los `veh_*` = NaN**.
-- Nunca se reemplazan NaN por 0 en checkpoint queries.
+- Si `congruence_id == 4` → **todos los `veh_*` = 0** y `veh_total = 0`.
+- Si `cap_total` es `NaN` (caso no esperado si la congruencia se clasificó correctamente) → `veh_*` pueden quedar `NaN`.
 
 ---
 
