@@ -8,6 +8,7 @@ ENV/
 data/raw/*
 data/interim/*
 data/processed/*
+debug_output/*
 
 # Jupyter
 *.ipynb_checkpoints
