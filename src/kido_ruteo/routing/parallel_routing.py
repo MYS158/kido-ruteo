@@ -1,15 +1,15 @@
 """kido_ruteo.routing.parallel_routing
 
-Cómputo paralelo de MC/MC2 usado SOLO para el modo debug del checkpoint 2030.
+Cómputo paralelo de MC/MC2 (y sense_code) usando multiprocessing.
 
 Motivación:
 - Las rutas más cortas en NetworkX son cargas CPU-bound en Python (limitadas por el GIL en hilos).
 - En Windows se requiere multiprocessing para usar múltiples núcleos.
-- Esto se mantiene fuera del flujo normal/contractual salvo que se habilite explícitamente.
 
 Notas:
-- Cada worker carga el grafo desde GeoJSON una vez (en Windows, "spawn" no comparte memoria).
-    Esto puede consumir mucha RAM con grafos grandes.
+- En Windows, "spawn" no comparte memoria: cada worker mantiene su propio grafo.
+- Este módulo permite reutilizar un pool entre múltiples ejecuciones para evitar
+    re-cargar el grafo por cada checkpoint.
 """
 
 from __future__ import annotations
@@ -117,6 +117,120 @@ def _chunked(it: Iterable[_Task], chunk_size: int) -> Iterable[list[_Task]]:
         yield chunk
 
 
+class ParallelRoutingSession:
+    """Sesión reutilizable de ruteo paralelo.
+
+    Crea un ProcessPoolExecutor con initializer que carga el grafo y el catálogo
+    una sola vez por worker. Luego permite calcular MC/MC2 para múltiples dataframes
+    sin re-crear el pool.
+    """
+
+    def __init__(
+        self,
+        network_path: str,
+        sense_catalog_path: Optional[str] = None,
+        n_workers: int = 8,
+        chunk_size: int = 200,
+    ) -> None:
+        if n_workers <= 0:
+            raise ValueError("n_workers must be >= 1")
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be >= 1")
+
+        self._network_path = str(network_path)
+        self._sense_catalog_path = sense_catalog_path
+        self._n_workers = int(n_workers)
+        self._chunk_size = int(chunk_size)
+
+        self._executor: ProcessPoolExecutor | None = None
+
+    def __enter__(self) -> "ParallelRoutingSession":
+        if self._n_workers == 1:
+            self._executor = None
+            return self
+
+        self._executor = ProcessPoolExecutor(
+            max_workers=self._n_workers,
+            initializer=_init_worker,
+            initargs=(self._network_path, self._sense_catalog_path),
+        )
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if self._executor is not None:
+            self._executor.shutdown(wait=True, cancel_futures=False)
+            self._executor = None
+
+    def compute(
+        self,
+        df_od: pd.DataFrame,
+        checkpoint_node_col: str = "checkpoint_node_id",
+        origin_node_col: str = "origin_node_id",
+        dest_node_col: str = "destination_node_id",
+    ) -> pd.DataFrame:
+        """Calcula MC + MC2 (+ sense_code) para un dataframe.
+
+        Devuelve una copia de df_od con:
+          - mc_path, mc_distance_m, mc_time_h
+          - mc2_distance_m, sense_code
+        """
+        df = df_od.copy()
+
+        # Pre-crea salidas para preservar el orden de filas
+        if "mc_path" not in df.columns:
+            df["mc_path"] = pd.Series(index=df.index, dtype="object")
+        if "sense_code" not in df.columns:
+            df["sense_code"] = pd.Series(index=df.index, dtype="object")
+        for col in ["mc_distance_m", "mc_time_h", "mc2_distance_m"]:
+            if col not in df.columns:
+                df[col] = np.nan
+
+        # Fallback secuencial
+        if self._n_workers <= 1:
+            from .graph_loader import load_graph_from_geojson
+            from .shortest_path import compute_mc_matrix
+            from .constrained_path import compute_mc2_matrix
+
+            G = load_graph_from_geojson(self._network_path)
+            out = compute_mc_matrix(df, G, origin_node_col=origin_node_col, dest_node_col=dest_node_col)
+            out = compute_mc2_matrix(
+                out,
+                G,
+                checkpoint_col=checkpoint_node_col,
+                origin_node_col=origin_node_col,
+                dest_node_col=dest_node_col,
+                sense_catalog_path=self._sense_catalog_path,
+            )
+            return out
+
+        if self._executor is None:
+            raise RuntimeError("ParallelRoutingSession not started: use it as a context manager")
+
+        tasks = (
+            _Task(
+                idx=int(i),
+                origin_node=df.at[i, origin_node_col],
+                dest_node=df.at[i, dest_node_col],
+                checkpoint_node=df.at[i, checkpoint_node_col] if checkpoint_node_col in df.columns else np.nan,
+            )
+            for i in df.index
+        )
+
+        results: list[dict] = []
+        for chunk_out in self._executor.map(_process_chunk, _chunked(tasks, self._chunk_size)):
+            results.extend(chunk_out)
+
+        for r in results:
+            i = r["idx"]
+            df.at[i, "mc_path"] = r["mc_path"]
+            df.at[i, "mc_distance_m"] = r["mc_distance_m"]
+            df.at[i, "mc_time_h"] = r["mc_time_h"]
+            df.at[i, "mc2_distance_m"] = r["mc2_distance_m"]
+            df.at[i, "sense_code"] = r["sense_code"]
+
+        return df
+
+
 def compute_mc_and_mc2_parallel_debug2030(
     df_od: pd.DataFrame,
     network_path: str,
@@ -133,56 +247,16 @@ def compute_mc_and_mc2_parallel_debug2030(
     #   - mc_path, mc_distance_m, mc_time_h
     #   - mc2_distance_m, sense_code
 
-    if n_workers <= 1:
-        # Fallback: secuencial usando funciones existentes (mantiene el comportamiento)
-        from .shortest_path import compute_mc_matrix
-        from .constrained_path import compute_mc2_matrix
-
-        out = compute_mc_matrix(df_od, _G if _G is not None else load_graph_from_geojson(network_path))
-        out = compute_mc2_matrix(out, _G if _G is not None else load_graph_from_geojson(network_path), checkpoint_col=checkpoint_node_col, origin_node_col=origin_node_col, dest_node_col=dest_node_col, sense_catalog_path=sense_catalog_path)
-        return out
-
-    df = df_od.copy()
-
-    # Pre-crea salidas para preservar el orden de filas
-    # NOTA: pandas infiere dtype float para `np.nan`, lo que luego rompe cuando
-    # asignamos strings (FutureWarning hoy, error en futuras versiones).
-    if "mc_path" not in df.columns:
-        df["mc_path"] = pd.Series(index=df.index, dtype="object")
-    if "sense_code" not in df.columns:
-        df["sense_code"] = pd.Series(index=df.index, dtype="object")
-    for col in ["mc_distance_m", "mc_time_h", "mc2_distance_m"]:
-        if col not in df.columns:
-            df[col] = np.nan
-
-    tasks = (
-        _Task(
-            idx=int(i),
-            origin_node=df.at[i, origin_node_col],
-            dest_node=df.at[i, dest_node_col],
-            checkpoint_node=df.at[i, checkpoint_node_col] if checkpoint_node_col in df.columns else np.nan,
+    # Compatibilidad: mantiene firma previa, pero implementa usando la sesión.
+    with ParallelRoutingSession(
+        network_path=str(network_path),
+        sense_catalog_path=sense_catalog_path,
+        n_workers=n_workers,
+        chunk_size=chunk_size,
+    ) as session:
+        return session.compute(
+            df_od,
+            checkpoint_node_col=checkpoint_node_col,
+            origin_node_col=origin_node_col,
+            dest_node_col=dest_node_col,
         )
-        for i in df.index
-    )
-
-    results: list[dict] = []
-
-    # Process pool compatible con Windows
-    with ProcessPoolExecutor(
-        max_workers=n_workers,
-        initializer=_init_worker,
-        initargs=(str(network_path), sense_catalog_path),
-    ) as ex:
-        for chunk_out in ex.map(_process_chunk, _chunked(tasks, chunk_size)):
-            results.extend(chunk_out)
-
-    # Assign back
-    for r in results:
-        i = r["idx"]
-        df.at[i, "mc_path"] = r["mc_path"]
-        df.at[i, "mc_distance_m"] = r["mc_distance_m"]
-        df.at[i, "mc_time_h"] = r["mc_time_h"]
-        df.at[i, "mc2_distance_m"] = r["mc2_distance_m"]
-        df.at[i, "sense_code"] = r["sense_code"]
-
-    return df
