@@ -36,7 +36,7 @@ def test_vehicle_calculation_nan_logic():
         'focup_CAI': [np.nan, np.nan],
         'focup_CAII': [np.nan, np.nan],
         'congruence_id': [1, 1],
-        'intrazonal_factor': [1, 1],
+        'intrazonal_factor': [0, 0],
     })
     
     # Run calculation
@@ -68,7 +68,7 @@ def test_vehicle_calculation_no_moto():
         'focup_CAI': [np.nan],
         'focup_CAII': [np.nan],
         'congruence_id': [1],
-        'intrazonal_factor': [1]
+        'intrazonal_factor': [0]
     })
     # valid_mask is internal
     result = calculate_vehicle_trips(df)

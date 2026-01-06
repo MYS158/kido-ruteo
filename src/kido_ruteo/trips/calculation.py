@@ -6,7 +6,7 @@ def calculate_vehicle_trips(df: pd.DataFrame) -> pd.DataFrame:
     Calcula viajes vehiculares (STRICT MODE) según flow.md.
 
     Fórmula:
-        Veh_cat = (Trips_person × (1 - intrazonal_factor) × FA × Share_cat) / Focup_cat
+        Veh_cat = (Trips_person × (1 - intrazonal_factor) × FA × Share_cat) / (Focup_cat × 7)
 
     Donde:
       - Share_cat = cap_cat / cap_total
@@ -92,7 +92,7 @@ def calculate_vehicle_trips(df: pd.DataFrame) -> pd.DataFrame:
         if can_compute.any():
             df.loc[can_compute, veh_cols[cat]] = (
                 trips_eff.loc[can_compute] * df.loc[can_compute, 'fa'] * share.loc[can_compute]
-            ) / df.loc[can_compute, focup_cols[cat]]
+            ) / (df.loc[can_compute, focup_cols[cat]] * 7.0)
 
     # veh_total solo si todas las categorías quedaron definidas
     veh_cols_list = [veh_cols[cat] for cat in categories]

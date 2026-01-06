@@ -32,7 +32,7 @@ class TestStrictBusinessRules(unittest.TestCase):
             'checkpoint_id': ['2001'],
             'sense_code': ['1-3'],
             'trips_person': [100],
-            'intrazonal_factor': [1]
+            'intrazonal_factor': [0]
         })
         
         self.capacity = pd.DataFrame({
@@ -76,18 +76,20 @@ class TestStrictBusinessRules(unittest.TestCase):
 
         # 2. Congruence (needs route validity)
         df['has_valid_path'] = True
+        df['mc_distance_m'] = 1000.0
+        df['mc2_distance_m'] = 1050.0  # +5% (dentro de ±10%)
         df = classify_congruence(df)
-        self.assertEqual(df['congruence_id'].iloc[0], 1)
+        self.assertEqual(df['congruence_id'].iloc[0], 3)
         
         # 3. Calculate Vehicles
         df = calculate_vehicle_trips(df)
 
         # cap_A=50, cap_CU=50, cap_total=100, FA=1.0, focup_A=2.0, focup_CU=2.0
-        # veh_A = 100*1.0*(0.5)/2 = 25
-        # veh_CU = 100*1.0*(0.5)/2 = 25
-        self.assertAlmostEqual(df['veh_A'].iloc[0], 25.0, places=6)
-        self.assertAlmostEqual(df['veh_CU'].iloc[0], 25.0, places=6)
-        self.assertAlmostEqual(df['veh_total'].iloc[0], 50.0, places=6)
+        # veh_A = 100*1.0*(0.5)/(2*7) = 25/7
+        # veh_CU = 100*1.0*(0.5)/(2*7) = 25/7
+        self.assertAlmostEqual(df['veh_A'].iloc[0], 25.0 / 7.0, places=6)
+        self.assertAlmostEqual(df['veh_CU'].iloc[0], 25.0 / 7.0, places=6)
+        self.assertAlmostEqual(df['veh_total'].iloc[0], 50.0 / 7.0, places=6)
 
     def test_vehicle_sum_integrity(self):
         """Test that veh_total equals the sum of all vehicle categories."""
@@ -118,8 +120,8 @@ class TestStrictBusinessRules(unittest.TestCase):
         self.assertEqual(df['congruence_id'].iloc[0], 4)
         
         df = calculate_vehicle_trips(df)
-        # Now we expect NaN, not 0.0
-        self.assertTrue(np.isnan(df['veh_total'].iloc[0]))
+        # STRICT: congruence_id==4 => veh_total = 0 (explícito)
+        self.assertEqual(df['veh_total'].iloc[0], 0.0)
 
     def test_sense_zero_not_fallback_for_directional_checkpoint(self):
         """STRICT (FLOW): en checkpoint direccional, sense_code='0' NO hace match ni agrega."""
@@ -129,7 +131,7 @@ class TestStrictBusinessRules(unittest.TestCase):
             'checkpoint_id': ['2001'],
             'sense_code': ['0'],
             'trips_person': [100],
-            'intrazonal_factor': [1]
+            'intrazonal_factor': [0]
         })
         
         # Capacity direccional (no existe Sentido='0')
@@ -157,7 +159,7 @@ class TestStrictBusinessRules(unittest.TestCase):
             # Sense derivado por geometría (puede ser distinto de '0')
             'sense_code': ['1-3'],
             'trips_person': [100],
-            'intrazonal_factor': [1]
+            'intrazonal_factor': [0]
         })
 
         cap_df = pd.DataFrame({
@@ -171,8 +173,8 @@ class TestStrictBusinessRules(unittest.TestCase):
 
         df_matched = match_capacity_to_od(df, cap_df)
         self.assertFalse(np.isnan(df_matched['cap_total'].iloc[0]))
-        # NO sobrescribir el sense_code derivado
-        self.assertEqual(df_matched['sense_code'].iloc[0], '1-3')
+        # STRICT: en checkpoints agregados se fuerza conceptualmente sense_code='0'
+        self.assertEqual(df_matched['sense_code'].iloc[0], '0')
 
     def test_aggregated_checkpoint_allows_derived_sense_and_computes_vehicles(self):
         """Checkpoint agregado: Sentido='0' aplica a cualquier sense_code derivado; congruence=1; veh_* numéricos."""
@@ -182,7 +184,7 @@ class TestStrictBusinessRules(unittest.TestCase):
             'checkpoint_id': ['3000'],
             'sense_code': ['4-2'],
             'trips_person': [100],
-            'intrazonal_factor': [1],
+            'intrazonal_factor': [0],
             'has_valid_path': [True],
         })
 
@@ -204,14 +206,18 @@ class TestStrictBusinessRules(unittest.TestCase):
         self.assertFalse(np.isnan(df['cap_total'].iloc[0]))
 
         df = classify_congruence(df)
-        self.assertEqual(df['congruence_id'].iloc[0], 1)
+        # Para ser 3 (no 4), se requiere validación de distancias dentro de ±10%
+        df['mc_distance_m'] = 1000.0
+        df['mc2_distance_m'] = 950.0
+        df = classify_congruence(df)
+        self.assertEqual(df['congruence_id'].iloc[0], 3)
 
         df = calculate_vehicle_trips(df)
         self.assertFalse(np.isnan(df['veh_A'].iloc[0]))
         self.assertFalse(np.isnan(df['veh_CU'].iloc[0]))
-        self.assertAlmostEqual(df['veh_A'].iloc[0], 25.0, places=6)
-        self.assertAlmostEqual(df['veh_CU'].iloc[0], 25.0, places=6)
-        self.assertAlmostEqual(df['veh_total'].iloc[0], 50.0, places=6)
+        self.assertAlmostEqual(df['veh_A'].iloc[0], 25.0 / 7.0, places=6)
+        self.assertAlmostEqual(df['veh_CU'].iloc[0], 25.0 / 7.0, places=6)
+        self.assertAlmostEqual(df['veh_total'].iloc[0], 50.0 / 7.0, places=6)
 
     def test_directional_checkpoint_two_senses_missing_match_is_impossible(self):
         """Checkpoint direccional (2 sentidos explícitos): si sense_code no existe en capacity => cap NaN, congruence=4, veh NaN."""
@@ -221,7 +227,7 @@ class TestStrictBusinessRules(unittest.TestCase):
             'checkpoint_id': ['4000'],
             'sense_code': ['9-9'],
             'trips_person': [100],
-            'intrazonal_factor': [1],
+            'intrazonal_factor': [0],
             'has_valid_path': [True],
         })
 
@@ -246,7 +252,8 @@ class TestStrictBusinessRules(unittest.TestCase):
         self.assertEqual(df['congruence_id'].iloc[0], 4)
 
         df = calculate_vehicle_trips(df)
-        self.assertTrue(np.isnan(df['veh_total'].iloc[0]))
+        # STRICT: congruence_id==4 => veh_total = 0
+        self.assertEqual(df['veh_total'].iloc[0], 0.0)
 
     def test_mixed_checkpoint_warns_and_treats_as_directional(self):
         """Checkpoint mixto (Sentido 0 y !=0): warning y comportamiento direccional (sin fallback a 0)."""

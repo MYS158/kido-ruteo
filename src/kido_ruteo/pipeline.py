@@ -54,11 +54,6 @@ def run_pipeline(
     debug_enabled = bool(debug_checkpoint_id)
     if debug_enabled:
         debug_checkpoint_id = str(debug_checkpoint_id).strip()
-        if debug_checkpoint_id != '2030':
-            raise ValueError(
-                "DEBUG_CHECKPOINT_ID solo soporta 2030 en este branch de depuración. "
-                f"Recibido: {debug_checkpoint_id}"
-            )
         debug_output_dir = Path(os.environ.get('DEBUG_OUTPUT_DIR', 'debug_output')).resolve()
         debug_plots_dir = debug_output_dir / 'plots'
         debug_output_dir.mkdir(parents=True, exist_ok=True)
@@ -97,7 +92,7 @@ def run_pipeline(
     # No need for duplicate check here
     df_od = prepare_data(df_od)
 
-    # DEBUG focalizado: filtrar SOLO checkpoint 2030 (sin afectar runs normales)
+    # DEBUG focalizado: filtrar SOLO checkpoint solicitado (sin afectar runs normales)
     if debug_enabled:
         if 'checkpoint_id' not in df_od.columns:
             df_od['checkpoint_id'] = debug_checkpoint_id
@@ -228,8 +223,8 @@ def run_pipeline(
     logger.info("[Paso 5] Integración de Capacidad")
     df_cap = load_capacity_data(capacity_path)
 
-    # DEBUG: validación específica (checkpoint 2030 debe ser agregado, Sentido=0)
-    if debug_enabled:
+    # DEBUG: validación específica (solo checkpoint 2030 debe ser agregado, Sentido=0)
+    if debug_enabled and str(debug_checkpoint_id) == '2030':
         cap2030 = df_cap[df_cap['Checkpoint'].astype(str).eq(debug_checkpoint_id)].copy()
         if cap2030.empty:
             raise AssertionError(f"DEBUG 2030: summary_capacity no contiene Checkpoint={debug_checkpoint_id}")
@@ -250,7 +245,7 @@ def run_pipeline(
 
     df_od = match_capacity_to_od(df_od, df_cap)
 
-    if debug_enabled:
+    if debug_enabled and str(debug_checkpoint_id) == '2030':
         # checkpoint 2030 debe ser NO direccional
         if 'checkpoint_is_directional' not in df_od.columns:
             raise AssertionError("DEBUG 2030: columna checkpoint_is_directional no fue calculada")
@@ -286,6 +281,7 @@ def run_pipeline(
             'veh_M', 'veh_A', 'veh_B', 'veh_CU', 'veh_CAI', 'veh_CAII',
             'veh_total',
             'congruence_id',
+            'congruence_reason',
         ]
         for c in trace_cols:
             if c not in df_od.columns:
@@ -311,18 +307,22 @@ def run_pipeline(
             'veh_M', 'veh_A', 'veh_B', 'veh_CU', 'veh_CAI', 'veh_CAII',
             'veh_total',
             'congruence_id',
+            'congruence_reason',
         ]
         df_trace = df_trace[ordered]
 
-        trace_path = debug_output_dir / 'debug_checkpoint2030_trace.csv'
+        trace_path = debug_output_dir / f'debug_checkpoint{debug_checkpoint_id}_trace.csv'
         df_trace.to_csv(trace_path, index=False)
-        logger.info("🧪 DEBUG 2030: traza guardada: %s", str(trace_path))
+        logger.info("🧪 DEBUG %s: traza guardada: %s", debug_checkpoint_id, str(trace_path))
 
         # Visualizaciones
         viz = DebugVisualizer(output_dir=str(debug_plots_dir))
 
         # 1) Flujo lógico (tabular)
-        viz.plot_logic_flow(df_trace, save_to=str(debug_plots_dir / 'checkpoint2030_logic_flow.png'))
+        viz.plot_logic_flow(
+            df_trace,
+            save_to=str(debug_plots_dir / f'checkpoint{debug_checkpoint_id}_logic_flow.png'),
+        )
 
         # 2) Rutas MC vs MC2 + sentido (limitado por DEBUG_MAX_ROUTE_PLOTS)
         plotted = 0
@@ -365,7 +365,7 @@ def run_pipeline(
                 origin_id=origin_id,
                 dest_id=dest_id,
                 sense_code=sense_code,
-                save_to=str(debug_plots_dir / f'checkpoint2030_route_{origin_id}_{dest_id}.png'),
+                save_to=str(debug_plots_dir / f'checkpoint{debug_checkpoint_id}_route_{origin_id}_{dest_id}.png'),
             )
 
             # Detalle de sentido (entrante/saliente)
@@ -390,11 +390,16 @@ def run_pipeline(
                 sense_code=sense_code,
                 origin_id=origin_id,
                 dest_id=dest_id,
-                save_to=str(debug_plots_dir / f'checkpoint2030_sense_{origin_id}_{dest_id}.png'),
+                save_to=str(debug_plots_dir / f'checkpoint{debug_checkpoint_id}_sense_{origin_id}_{dest_id}.png'),
             )
 
             plotted += 1
-        logger.info("🧪 DEBUG 2030: plots generados para %s ODs (max=%s)", plotted, debug_max_route_plots)
+        logger.info(
+            "🧪 DEBUG %s: plots generados para %s ODs (max=%s)",
+            debug_checkpoint_id,
+            plotted,
+            debug_max_route_plots,
+        )
     
     # --- Paso 8: Guardar Resultados ---
     logger.info("[Paso 8] Guardando Resultados")

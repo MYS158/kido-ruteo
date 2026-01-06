@@ -122,7 +122,7 @@ class TestStrictModeV2(unittest.TestCase):
             'origin_id': [1],
             'destination_id': [2],
             'trips_person': [100],
-            'intrazonal_factor': [1]
+            'intrazonal_factor': [0]
         })
         
         # Match con capacidad (no debe encontrar)
@@ -132,17 +132,22 @@ class TestStrictModeV2(unittest.TestCase):
         self.assertTrue(pd.isna(df_matched['cap_total'].iloc[0]))
         
         # Calcular viajes vehiculares
-        df_matched['congruence_id'] = 1
+        df_matched['mc_distance_m'] = 1000.0
+        df_matched['mc2_distance_m'] = 1000.0
+        df_matched = df_matched.copy()
+        df_matched['has_valid_path'] = True
+        from kido_ruteo.congruence.classification import classify_congruence
+        df_matched = classify_congruence(df_matched)
         df_veh = calculate_vehicle_trips(df_matched)
         
-        # TODOS los veh_* deben ser NaN
-        self.assertTrue(pd.isna(df_veh['veh_M'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_A'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_B'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_CU'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_CAI'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_CAII'].iloc[0]))
-        self.assertTrue(pd.isna(df_veh['veh_total'].iloc[0]))
+        # STRICT: sin match de capacidad => congruence_id=4 => veh_* = 0 (explícito)
+        self.assertEqual(df_veh['veh_M'].iloc[0], 0.0)
+        self.assertEqual(df_veh['veh_A'].iloc[0], 0.0)
+        self.assertEqual(df_veh['veh_B'].iloc[0], 0.0)
+        self.assertEqual(df_veh['veh_CU'].iloc[0], 0.0)
+        self.assertEqual(df_veh['veh_CAI'].iloc[0], 0.0)
+        self.assertEqual(df_veh['veh_CAII'].iloc[0], 0.0)
+        self.assertEqual(df_veh['veh_total'].iloc[0], 0.0)
     
     def test_rule5_output_exactly_9_columns(self):
         """
@@ -195,7 +200,7 @@ class TestStrictModeV2(unittest.TestCase):
             'origin_id': [1],
             'destination_id': [2],
             'trips_person': [100],
-            'intrazonal_factor': [1],
+            'intrazonal_factor': [0],
             'fa': [1.0],
             'cap_M': [0],
             'cap_A': [1500],
@@ -210,8 +215,13 @@ class TestStrictModeV2(unittest.TestCase):
             'focup_CU': [np.nan],  # <- provoca veh_CU = NaN
             'focup_CAI': [np.nan],
             'focup_CAII': [np.nan],
-            'congruence_id': [1],
+            'mc_distance_m': [1000.0],
+            'mc2_distance_m': [1000.0],
+            'has_valid_path': [True],
         })
+
+        from kido_ruteo.congruence.classification import classify_congruence
+        df_od = classify_congruence(df_od)
         
         # Calcular viajes vehiculares
         df_veh = calculate_vehicle_trips(df_od)
@@ -234,7 +244,7 @@ class TestStrictModeV2(unittest.TestCase):
             'origin_id': [1],
             'destination_id': [2],
             'trips_person': [300],  # 300 personas
-            'intrazonal_factor': [1]
+            'intrazonal_factor': [0]
         })
         
         # Match con capacidad (debe encontrar)
@@ -244,19 +254,24 @@ class TestStrictModeV2(unittest.TestCase):
         self.assertFalse(pd.isna(df_matched['cap_total'].iloc[0]))
         self.assertEqual(df_matched['cap_A'].iloc[0], 1500)
         
-        df_matched['congruence_id'] = 1
+        df_matched['mc_distance_m'] = 1000.0
+        df_matched['mc2_distance_m'] = 1000.0
+        df_matched = df_matched.copy()
+        df_matched['has_valid_path'] = True
+        from kido_ruteo.congruence.classification import classify_congruence
+        df_matched = classify_congruence(df_matched)
         df_veh = calculate_vehicle_trips(df_matched)
 
         # cap_A=1500, cap_CU=500, cap_total=2000, FA=1.0, focup_A=2.0, focup_CU=2.0
-        # share_A=0.75 => veh_A=300*1.0*0.75/2=112.5
-        # share_CU=0.25 => veh_CU=300*1.0*0.25/2=37.5
-        self.assertAlmostEqual(df_veh['veh_A'].iloc[0], 112.5, places=4)
-        self.assertAlmostEqual(df_veh['veh_CU'].iloc[0], 37.5, places=4)
-        self.assertAlmostEqual(df_veh['veh_total'].iloc[0], 150.0, places=4)
+        # share_A=0.75 => veh_A=300*1.0*0.75/(2*7)=112.5/7
+        # share_CU=0.25 => veh_CU=300*1.0*0.25/(2*7)=37.5/7
+        self.assertAlmostEqual(df_veh['veh_A'].iloc[0], 112.5 / 7.0, places=4)
+        self.assertAlmostEqual(df_veh['veh_CU'].iloc[0], 37.5 / 7.0, places=4)
+        self.assertAlmostEqual(df_veh['veh_total'].iloc[0], 150.0 / 7.0, places=4)
     
     def test_intrazonal_factor_zeros_vehicles(self):
         """
-        Test que intrazonal_factor = 0 anula los viajes vehiculares.
+        Test que intrazonal_factor = 1 (intrazonal) anula los viajes vehiculares.
         """
         # OD intrazonal (mismo origen y destino)
         df_od = pd.DataFrame({
@@ -265,13 +280,18 @@ class TestStrictModeV2(unittest.TestCase):
             'origin_id': [1],
             'destination_id': [1],  # Mismo que origen
             'trips_person': [100],
-            'intrazonal_factor': [0],  # Anula viajes
+            'intrazonal_factor': [1],  # Intrazonal => anula viajes
             'fa': [1.0],
             'cap_M': [0], 'cap_A': [1500], 'cap_B': [0], 'cap_CU': [500], 'cap_CAI': [0], 'cap_CAII': [0],
             'cap_total': [2000],
             'focup_M': [np.nan], 'focup_A': [2.0], 'focup_B': [np.nan], 'focup_CU': [2.0], 'focup_CAI': [np.nan], 'focup_CAII': [np.nan],
-            'congruence_id': [1],
+            'mc_distance_m': [1000.0],
+            'mc2_distance_m': [1000.0],
+            'has_valid_path': [True],
         })
+
+        from kido_ruteo.congruence.classification import classify_congruence
+        df_od = classify_congruence(df_od)
         
         # Calcular viajes vehiculares
         df_veh = calculate_vehicle_trips(df_od)
@@ -292,7 +312,7 @@ class TestStrictModeV2(unittest.TestCase):
             'origin_id': [1, 2, 3],
             'destination_id': [2, 3, 4],
             'trips_person': [100, 100, 100],
-            'intrazonal_factor': [1, 1, 1]
+            'intrazonal_factor': [0, 0, 0]
         })
         
         # Match con capacidad

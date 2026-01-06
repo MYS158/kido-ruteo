@@ -38,8 +38,9 @@ def test_sense_zero_invalid_strict():
     
     # Trips
     df = calculate_vehicle_trips(df)
-    assert np.isnan(df.iloc[0]['veh_total'])
-    assert np.isnan(df.iloc[0]['veh_A'])
+    # STRICT: congruence_id==4 => veh_* = 0 (explícito), no NaN
+    assert df.iloc[0]['veh_total'] == 0.0
+    assert df.iloc[0]['veh_A'] == 0.0
 
 def test_capacity_mismatch_blocks_congruence():
     """
@@ -68,6 +69,42 @@ def test_intrazonal_logic():
     df = prepare_data(df)
     assert df.iloc[0]['is_intrazonal'] == True
     assert df.iloc[1]['is_intrazonal'] == False
+
+
+def test_congruence_distance_band_rule():
+    """Si MC2 está fuera de ±10% de MC => congruence_id=4."""
+    df = pd.DataFrame(
+        {
+            'checkpoint_id': ['2001'],
+            'sense_code': ['1-3'],
+            'checkpoint_is_directional': [True],
+            'cap_total': [1000.0],
+            'has_valid_path': [True],
+            'mc_distance_m': [1000.0],
+            'mc2_distance_m': [1200.0],  # +20% (fuera)
+        }
+    )
+    df = classify_congruence(df)
+    assert int(df['congruence_id'].iloc[0]) == 4
+    assert str(df['congruence_reason'].iloc[0]) == 'mc2_outside_10pct_of_mc'
+
+
+def test_congruence_reason_within_band():
+    """Si MC2 está dentro de ±10% de MC => congruence_id=3 y motivo correspondiente."""
+    df = pd.DataFrame(
+        {
+            'checkpoint_id': ['2001'],
+            'sense_code': ['1-3'],
+            'checkpoint_is_directional': [True],
+            'cap_total': [1000.0],
+            'has_valid_path': [True],
+            'mc_distance_m': [1000.0],
+            'mc2_distance_m': [910.0],  # -9% (dentro)
+        }
+    )
+    df = classify_congruence(df)
+    assert int(df['congruence_id'].iloc[0]) == 3
+    assert str(df['congruence_reason'].iloc[0]) == 'mc2_within_10pct_of_mc'
 
 if __name__ == "__main__":
     sys.exit(pytest.main(["-v", __file__]))
