@@ -150,7 +150,7 @@ La salida contractual se genera en `data/processed/` con prefijo `processed_`.
 
 ## 📄 Licencia
 
-MIT License
+//
 
 ---
 
