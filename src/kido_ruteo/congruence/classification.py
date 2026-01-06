@@ -44,7 +44,13 @@ def classify_congruence(df: pd.DataFrame) -> pd.DataFrame:
 
     impossible = invalid_route | invalid_sense | invalid_capacity | zero_capacity
 
-    # Validación de distancias: requiere MC y MC2 válidas
+    # Regla: si la ruta MC2 pasa por el enlace del checkpoint => congruencia 1
+    if 'mc2_passes_checkpoint_link' in df.columns:
+        passes_cp = df['mc2_passes_checkpoint_link'].astype('boolean').fillna(False)
+    else:
+        passes_cp = pd.Series([False] * len(df), index=df.index)
+
+    # Validación de distancias (±10%): solo aplica si NO pasa por el checkpoint
     if 'mc_distance_m' in df.columns and 'mc2_distance_m' in df.columns:
         mc = pd.to_numeric(df['mc_distance_m'], errors='coerce')
         mc2 = pd.to_numeric(df['mc2_distance_m'], errors='coerce')
@@ -52,22 +58,25 @@ def classify_congruence(df: pd.DataFrame) -> pd.DataFrame:
         valid_mc2 = mc2.notna() & (mc2 > 0)
         ratio_ok = (mc2 >= (0.9 * mc)) & (mc2 <= (1.1 * mc))
         dist_congruent = valid_mc & valid_mc2 & ratio_ok
+        missing_distances = mc.isna() | mc2.isna() | (mc <= 0) | (mc2 <= 0)
     else:
-        # Si no tenemos ambas distancias, no podemos validar => imposible
         dist_congruent = pd.Series([False] * len(df), index=df.index)
+        missing_distances = pd.Series([True] * len(df), index=df.index)
 
-    df['congruence_id'] = np.where(~impossible & dist_congruent, 3, 4)
+    is_valid_base = ~impossible
+    id1 = is_valid_base & passes_cp
+    id3 = is_valid_base & (~passes_cp) & dist_congruent
+
+    df['congruence_id'] = np.select(
+        [id1, id3],
+        [1, 3],
+        default=4,
+    )
 
     # Motivo / etiqueta explicativa para debug
-    # Prioridad (para congruence_id=4): ruta/sentido/capacidad -> distancia
-    missing_distances = pd.Series([True] * len(df), index=df.index)
-    if 'mc_distance_m' in df.columns and 'mc2_distance_m' in df.columns:
-        mc = pd.to_numeric(df['mc_distance_m'], errors='coerce')
-        mc2 = pd.to_numeric(df['mc2_distance_m'], errors='coerce')
-        missing_distances = mc.isna() | mc2.isna() | (mc <= 0) | (mc2 <= 0)
-
     reasons = np.select(
         [
+            df['congruence_id'].eq(1),
             df['congruence_id'].eq(3),
             invalid_route,
             invalid_sense,
@@ -76,6 +85,7 @@ def classify_congruence(df: pd.DataFrame) -> pd.DataFrame:
             missing_distances,
         ],
         [
+            'passes_checkpoint_link',
             'mc2_within_10pct_of_mc',
             'invalid_route',
             'invalid_sense',
@@ -87,5 +97,9 @@ def classify_congruence(df: pd.DataFrame) -> pd.DataFrame:
     )
 
     df['congruence_reason'] = pd.Series(reasons, index=df.index, dtype='string')
-    df['congruence_label'] = np.where(df['congruence_id'] == 3, 'Within10pct', 'Impossible')
+    df['congruence_label'] = np.select(
+        [df['congruence_id'].eq(1), df['congruence_id'].eq(3)],
+        ['PassesCheckpoint', 'Within10pct'],
+        default='Impossible',
+    )
     return df

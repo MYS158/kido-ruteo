@@ -189,6 +189,7 @@ def compute_mc2_matrix(
     
     dist_mc2 = []
     derived_senses = []
+    passes_cp_link = []
     
     for idx, row in tqdm(df_od.iterrows(), total=len(df_od)):
         origin = row.get(origin_node_col)
@@ -198,6 +199,7 @@ def compute_mc2_matrix(
         if pd.isna(origin) or pd.isna(dest) or pd.isna(checkpoint):
             dist_mc2.append(None)
             derived_senses.append(np.nan)
+            passes_cp_link.append(False)
             continue
             
         checkpoint = str(checkpoint)
@@ -205,6 +207,17 @@ def compute_mc2_matrix(
         path, dist = compute_constrained_shortest_path(G, origin, dest, checkpoint)
         
         dist_mc2.append(dist)
+
+        # ¿La ruta realmente atraviesa el checkpoint (enlace a través del nodo)?
+        # True solo si el checkpoint está en medio del path (no como origen/destino).
+        cp_ok = False
+        if path:
+            try:
+                i_cp = path.index(checkpoint)
+                cp_ok = (i_cp > 0) and (i_cp < (len(path) - 1))
+            except ValueError:
+                cp_ok = False
+        passes_cp_link.append(bool(cp_ok))
 
         # Derivar + validar sentido (lookup obligatorio)
         sense_candidate = None
@@ -222,5 +235,6 @@ def compute_mc2_matrix(
     df_od['mc2_distance_m'] = dist_mc2
     # Overwrite/create sense_code (STRICT: only here, derived from MC2)
     df_od['sense_code'] = derived_senses
+    df_od['mc2_passes_checkpoint_link'] = passes_cp_link
         
     return df_od

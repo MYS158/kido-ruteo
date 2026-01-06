@@ -82,6 +82,7 @@ def test_congruence_distance_band_rule():
             'has_valid_path': [True],
             'mc_distance_m': [1000.0],
             'mc2_distance_m': [1200.0],  # +20% (fuera)
+            'mc2_passes_checkpoint_link': [False],
         }
     )
     df = classify_congruence(df)
@@ -100,11 +101,31 @@ def test_congruence_reason_within_band():
             'has_valid_path': [True],
             'mc_distance_m': [1000.0],
             'mc2_distance_m': [910.0],  # -9% (dentro)
+            'mc2_passes_checkpoint_link': [False],
         }
     )
     df = classify_congruence(df)
     assert int(df['congruence_id'].iloc[0]) == 3
     assert str(df['congruence_reason'].iloc[0]) == 'mc2_within_10pct_of_mc'
+
+
+def test_congruence_checkpoint_link_overrides_distance_rule():
+    """Si pasa por el enlace del checkpoint, congruencia=1 aunque MC2 no esté dentro de ±10%."""
+    df = pd.DataFrame(
+        {
+            'checkpoint_id': ['2001'],
+            'sense_code': ['1-3'],
+            'checkpoint_is_directional': [True],
+            'cap_total': [1000.0],
+            'has_valid_path': [True],
+            'mc_distance_m': [1000.0],
+            'mc2_distance_m': [1400.0],  # +40%
+            'mc2_passes_checkpoint_link': [True],
+        }
+    )
+    df = classify_congruence(df)
+    assert int(df['congruence_id'].iloc[0]) == 1
+    assert str(df['congruence_reason'].iloc[0]) == 'passes_checkpoint_link'
 
 if __name__ == "__main__":
     sys.exit(pytest.main(["-v", __file__]))

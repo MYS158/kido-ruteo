@@ -25,6 +25,8 @@ import os
 import numpy as np
 import pandas as pd
 
+from tqdm import tqdm
+
 from .graph_loader import load_graph_from_geojson
 from .shortest_path import compute_shortest_path_mc
 from .constrained_path import compute_constrained_shortest_path, derive_sense_from_path, _load_valid_sense_codes
@@ -69,6 +71,7 @@ def _process_chunk(tasks: list[_Task]) -> list[dict]:
                     "mc_distance_m": 0.0,
                     "mc_time_h": 0.0,
                     "mc2_distance_m": 0.0,
+                    "mc2_passes_checkpoint_link": False,
                     "sense_code": np.nan,
                 }
             )
@@ -80,12 +83,18 @@ def _process_chunk(tasks: list[_Task]) -> list[dict]:
         # MC2
         sense = np.nan
         mc2_dist = 0.0
+        mc2_passes = False
         if not pd.isna(checkpoint):
             cp = str(checkpoint)
             mc2_path, mc2_dist_val = compute_constrained_shortest_path(_G, origin, dest, cp)
             if mc2_dist_val is not None:
                 mc2_dist = float(mc2_dist_val)
             if mc2_path:
+                try:
+                    i_cp = mc2_path.index(cp)
+                    mc2_passes = (i_cp > 0) and (i_cp < (len(mc2_path) - 1))
+                except ValueError:
+                    mc2_passes = False
                 candidate = derive_sense_from_path(_G, mc2_path, cp)
                 if candidate == "0":
                     sense = "0"
@@ -99,6 +108,7 @@ def _process_chunk(tasks: list[_Task]) -> list[dict]:
                 "mc_distance_m": float(mc_dist) if mc_dist is not None else 0.0,
                 "mc_time_h": float(mc_time) if mc_time is not None else 0.0,
                 "mc2_distance_m": mc2_dist,
+                "mc2_passes_checkpoint_link": bool(mc2_passes),
                 "sense_code": sense,
             }
         )
@@ -181,6 +191,8 @@ class ParallelRoutingSession:
             df["mc_path"] = pd.Series(index=df.index, dtype="object")
         if "sense_code" not in df.columns:
             df["sense_code"] = pd.Series(index=df.index, dtype="object")
+        if "mc2_passes_checkpoint_link" not in df.columns:
+            df["mc2_passes_checkpoint_link"] = pd.Series(index=df.index, dtype="boolean")
         for col in ["mc_distance_m", "mc_time_h", "mc2_distance_m"]:
             if col not in df.columns:
                 df[col] = np.nan
@@ -216,8 +228,17 @@ class ParallelRoutingSession:
             for i in df.index
         )
 
+        total_rows = int(len(df))
+        total_chunks = int(math.ceil(total_rows / self._chunk_size)) if total_rows else 0
+
         results: list[dict] = []
-        for chunk_out in self._executor.map(_process_chunk, _chunked(tasks, self._chunk_size)):
+        chunk_iter = self._executor.map(_process_chunk, _chunked(tasks, self._chunk_size))
+        for chunk_out in tqdm(
+            chunk_iter,
+            total=total_chunks,
+            desc="Routing (MC+MC2)",
+            unit="chunk",
+        ):
             results.extend(chunk_out)
 
         for r in results:
@@ -226,6 +247,7 @@ class ParallelRoutingSession:
             df.at[i, "mc_distance_m"] = r["mc_distance_m"]
             df.at[i, "mc_time_h"] = r["mc_time_h"]
             df.at[i, "mc2_distance_m"] = r["mc2_distance_m"]
+            df.at[i, "mc2_passes_checkpoint_link"] = r.get("mc2_passes_checkpoint_link", False)
             df.at[i, "sense_code"] = r["sense_code"]
 
         return df

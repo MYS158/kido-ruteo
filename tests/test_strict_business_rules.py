@@ -78,6 +78,7 @@ class TestStrictBusinessRules(unittest.TestCase):
         df['has_valid_path'] = True
         df['mc_distance_m'] = 1000.0
         df['mc2_distance_m'] = 1050.0  # +5% (dentro de ±10%)
+        df['mc2_passes_checkpoint_link'] = False
         df = classify_congruence(df)
         self.assertEqual(df['congruence_id'].iloc[0], 3)
         
@@ -205,10 +206,9 @@ class TestStrictBusinessRules(unittest.TestCase):
         df = match_capacity_to_od(df, cap_df)
         self.assertFalse(np.isnan(df['cap_total'].iloc[0]))
 
-        df = classify_congruence(df)
-        # Para ser 3 (no 4), se requiere validación de distancias dentro de ±10%
         df['mc_distance_m'] = 1000.0
         df['mc2_distance_m'] = 950.0
+        df['mc2_passes_checkpoint_link'] = False
         df = classify_congruence(df)
         self.assertEqual(df['congruence_id'].iloc[0], 3)
 
